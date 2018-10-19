@@ -114,42 +114,13 @@
    
    USAGE
    
-   To hash a block of data, call MeowHash:
+   For a complete working example, see meow_example.cpp.
    
-       meow_lane MeowHash(u64 Seed, u64 Len, void *Source);
+   To hash a block of data, call a MeowHash implementation:
+   
+       #include <intrin.h>
+       #include "meow_hash.h"
        
-   Calling MeowHash with a seed, length, and source pointer invokes the
-   hash and returns a meow_lane union which contains the 512-bit result
-   accessible in a number of ways (u64[8], _m128i[4], _m256i[2],
-   and _m512i).  From there you can pull out what you want and discard the
-   rest, as the Meow hash is designed to produce high-quality hashes
-   when truncated down to anything 32 bits or greater.
-   
-   MeowHash is actually a variable which initially points to the most-
-   compatible MeowHash routine.  This is also the only routine that
-   can be run on today's silicon.  In the future, x64 CPUs will potentially
-   support wider AES operations, and Meow has implementations to accelerate
-   it on those CPUs.  You can compile them in using #define's (see the
-   above section on COMPILATION), and once you have, on initialization
-   your program can ask MeowHash to be specialized to the fastest Meow
-   by calling:
-   
-      u32 MeowHashSpecializeForCPU(void);
-      
-   It will return the bit width it chose (128, 256, or 512).  Not that
-   it will only pick from the compiled-in versions, so you must #define
-   MEOW_HASH_256 or MEOW_HASH_512 (or both) in order for it to have
-   any non-128-bit versions to choose from.
-   
-   Because it must use a static variable to do this, if you are calling
-   MeowHash from multiple threads, you will want to make single call
-   to MeowHash at the start of your program to ensure that the detection
-   is done cleanly on one thread and the variable is set.  This avoids
-   any race conditions that might occur on initialization.
-   
-   If you would rather do your own processor testing and specialization,
-   you can call Meow's processor-specific hashes directly.  They are:
-   
        // Always available
        meow_lane MeowHash1(u64 Seed, u64 Len, void *Source);
        
@@ -161,23 +132,21 @@
        
    MeowHash1 is 128-bit wide AES-NI.  MeowHash2 is 256-bit wide VAES.
    MeowHash4 is 512-bit wide VAES.  As of the initial publication of
-   Meow hash, no consumer CPUs exist which support VAES, so really this
-   is all for future use.
+   Meow hash, no consumer CPUs exist which support VAES, so these
+   are for future use and internal x64 vendor testing.
    
-   In addition to the MeowHash calls, there are also thunks included
-   that comply with the standard smhasher function prototype, since that
-   is the most common non-cryptographic hash testing framework.
-   There are versions for 32, 64, 128, and 256-bit hashing:
+   Calling MeowHash* with a seed, length, and source pointer invokes the
+   hash and returns a meow_lane union which contains the 512-bit result
+   accessible in a number of ways (u64[8], _m128i[4], _m256i[2],
+   and _m512i).  From there you can pull out what you want and discard the
+   rest, as the Meow hash is designed to produce high-quality hashes
+   when truncated down to anything 32 bits or greater.
    
-       void Meow_AES_32(const void * key, int len, u32 seed, void * out);
-       void Meow_AES_64(const void * key, int len, u32 seed, void * out);
-       void Meow_AES_128(const void * key, int len, u32 seed, void * out);
-       void Meow_AES_256(const void * key, int len, u32 seed, void * out);
-       
-   These can be dropped into the smhasher hash listing table for testing.
-   
-   There is no 512-bit thunk because smhasher doesn't support 512-bit
-   hashes.
+   Since no currently available CPUs can run MeowHash2 or MeowHash4,
+   it is not recommended that you include them in your code, because
+   they literally _cannot_ be tested.  Once CPUs are available that
+   can run them, you can include them and use a probing function
+   to see if they can be used at startup, as shown in meow_example.cpp.
    
    ======================================================================== */
 
