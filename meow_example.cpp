@@ -89,7 +89,7 @@ int main(int ArgCount, char **Args)
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
     __m128i Hash128 = Hash.L0;
-    log long unsigned Hash64 = Hash.Sub[0];
+    long long unsigned Hash64 = Hash.Sub[0];
     int unsigned Hash32 = Hash.Sub32[0];
     
     // NOTE(casey): Print the entire 512-bit hash value using the 32-bit accessor
