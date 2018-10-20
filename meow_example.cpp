@@ -72,7 +72,7 @@ int main(int ArgCount, char **Args)
     
     // NOTE(casey): Detect which MeowHash to call - do this only once, at startup.
     int BitWidth = MeowHashSpecializeForCPU();
-    printf("Using %u-bit Meow implemetation\n", BitWidth);
+    printf("Using %u-bit Meow implementation\n", BitWidth);
     
     // NOTE(casey): Make something random to hash
     int Size = 16000;
