@@ -23,14 +23,14 @@
 
 static meow_hash_implementation *MeowHash = MeowHash1;
 
-u32 MeowHashSpecializeForCPU(void)
+int MeowHashSpecializeForCPU(void)
 {
-    u32 Result = 0;
+    int Result = 0;
     
 #if defined(MEOW_HASH_512)
     __try
     {
-        u8 Garbage[64];
+        char Garbage[64];
         MeowHash4(0, sizeof(Garbage), Garbage);
         MeowHash = MeowHash4;
         Result = 512;
@@ -41,7 +41,7 @@ u32 MeowHashSpecializeForCPU(void)
 #if defined(MEOW_HASH_256)
         __try
         {
-            u8 Garbage[64];
+            char Garbage[64];
             MeowHash2(0, sizeof(Garbage), Garbage);
             MeowHash = MeowHash2;
             Result = 256;
@@ -89,8 +89,8 @@ int main(int ArgCount, char **Args)
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
     __m128i Hash128 = Hash.L0;
-    u64 Hash64 = Hash.Sub[0];
-    u32 Hash32 = Hash.Sub32[0];
+    log long unsigned Hash64 = Hash.Sub[0];
+    int unsigned Hash32 = Hash.Sub32[0];
     
     // NOTE(casey): Print the entire 512-bit hash value using the 32-bit accessor
     // (since 64-bit printf is spec'd horribly)

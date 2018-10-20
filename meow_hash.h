@@ -153,7 +153,7 @@
 #if defined(MEOW_HASH_SPECIALIZED)
 
 static meow_lane
-MEOW_HASH_SPECIALIZED(u64 Seed, u64 Len, void *SourceInit)
+MEOW_HASH_SPECIALIZED(meow_u64 Seed, meow_u64 Len, void *SourceInit)
 {
     // NOTE(casey): The initialization vector follows falkhash's lead and uses the seed twice, but the second time
     // the length plus one is added to differentiate.  This seemed sensible, but I haven't thought too hard about this,
@@ -169,8 +169,8 @@ MEOW_HASH_SPECIALIZED(u64 Seed, u64 Len, void *SourceInit)
     meow_lane SCDEF = IV;
     
     // NOTE(casey): Handle as many full 256-byte blocks as possible
-    u8 *Source = (u8 *)SourceInit;
-    u64 BlockCount = (Len >> 8);
+    meow_u8 *Source = (meow_u8 *)SourceInit;
+    meow_u64 BlockCount = (Len >> 8);
     Len -= (BlockCount << 8);
     while(BlockCount--)
     {
@@ -186,13 +186,13 @@ MEOW_HASH_SPECIALIZED(u64 Seed, u64 Len, void *SourceInit)
     {
         // TODO(casey): Can this just be zeroes?
         meow_lane Partial[] = {IV, IV, IV, IV};
-        u8 *Dest = (u8 *)Partial;
+        meow_u8 *Dest = (meow_u8 *)Partial;
         while(Len--)
         {
             *Dest++ = *Source++;
         }
 
-        u8 *P = (u8 *)Partial;
+        meow_u8 *P = (meow_u8 *)Partial;
         AESMerge(S0123, Partial[0]);
         AESMerge(S4567, Partial[1]);
         AESMerge(S89AB, Partial[2]);
@@ -241,9 +241,9 @@ MEOW_HASH_SPECIALIZED(u64 Seed, u64 Len, void *SourceInit)
 #if !defined(MEOW_HASH_TYPES)
 #define MEOW_HASH_VERSION 1
 #define MEOW_HASH_VERSION_NAME "0.1 Alpha"
-typedef char unsigned u8;
-typedef int unsigned u32;
-typedef long long unsigned u64;
+#define meow_u8 char unsigned
+#define meow_u32 int unsigned
+#define meow_u64 long long unsigned
 
 union meow_lane
 {
@@ -266,18 +266,18 @@ union meow_lane
         __m128i L2;
         __m128i L3;
     };
-
-    u64 Sub[8];
-    u32 Sub32[16];
+    
+    meow_u64 Sub[8];
+    meow_u32 Sub32[16];
 };
 
-typedef meow_lane meow_hash_implementation(u64 Seed, u64 Len, void *SourceInit);
+typedef meow_lane meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *SourceInit);
 
 #define MEOW_HASH_TYPES
 #endif
 
 static void
-AESRotate128x4(meow_lane &A, meow_lane &B)
+MeowAESRotate128x4(meow_lane &A, meow_lane &B)
 {
     A.L0 = _mm_aesdec_si128(A.L0, B.L0);
     A.L1 = _mm_aesdec_si128(A.L1, B.L1);
@@ -303,17 +303,20 @@ A.L0 = _mm_aesdec_si128(A.L0, B.L0); \
 A.L1 = _mm_aesdec_si128(A.L1, B.L1); \
 A.L2 = _mm_aesdec_si128(A.L2, B.L2); \
 A.L3 = _mm_aesdec_si128(A.L3, B.L3)
-#define AESRotate AESRotate128x4
+#define AESRotate MeowAESRotate128x4
 #include "meow_hash.h"
 
 // NOTE(casey): 256-wide VAES Meow (maximum of 32 bytes/clock)
 #if defined(MEOW_HASH_256)
 static void
-AESRotate256x2(meow_lane &A, meow_lane &B)
+MeowAESRotate256x2(meow_lane &A, meow_lane &B)
 {
     A.D0 = _mm256_aesdec_epi128(A.D0, B.D0);
     A.D1 = _mm256_aesdec_epi128(A.D1, B.D1);
 
+    // TODO(casey): This can be done with permutation instructions,
+    // but I will forgo implementing it that way until I have an
+    // actual CPU to test it on!
     __m128i Temp = B.L0;
     B.L0 = B.L1;
     B.L1 = B.L2;
@@ -327,17 +330,20 @@ S.D1 = _mm256_aesdec_epi128(S.D1, *(__m256i *)(From + 32))
 #define AESMerge(A, B) \
 A.D0 = _mm256_aesdec_epi128(A.D0, B.D0); \
 A.D1 = _mm256_aesdec_epi128(A.D1, B.D1)
-#define AESRotate AESRotate256x2
+#define AESRotate MeowAESRotate256x2
 #include "meow_hash.h"
 #endif
 
 // NOTE(casey): 512-wide VAES Meow (maximum of 64 bytes/clock)
 #if defined(MEOW_HASH_512)
 static void
-AESRotate512(meow_lane &A, meow_lane &B)
+MeowAESRotate512(meow_lane &A, meow_lane &B)
 {
     A.Q0 = _mm512_aesdec_epi128(A.Q0, B.Q0);
 
+    // TODO(casey): This rotate can be done with permutation instructions,
+    // but I will forgo implementing it that way until I have an
+    // actual CPU to test it on!
     __m128i Temp = B.L0;
     B.L0 = B.L1;
     B.L1 = B.L2;
@@ -349,7 +355,7 @@ AESRotate512(meow_lane &A, meow_lane &B)
 S.Q0 = _mm512_aesdec_epi128(S.Q0, *(__m512i *)(From))
 #define AESMerge(A, B) \
 A.Q0 = _mm512_aesdec_epi128(A.Q0, B.Q0);
-#define AESRotate AESRotate512
+#define AESRotate MeowAESRotate512
 #include "meow_hash.h"
 #endif
 
