@@ -9,8 +9,11 @@
 
 // NOTE(casey): Meow relies on definitions for __m128/256/512, so you must
 // have those defined either in your own include files or via a standard .h:
-#include <intrin.h>
-
+#if!defined(_MSC_VER)
+    #include <immintrin.h>
+#else
+    #include <intrin.h>
+#endif
 // NOTE(casey): We ask for all three versions here - if you only want the
 // 128-bit version, you can omit the two #define's.
 #define MEOW_HASH_256
@@ -27,7 +30,7 @@ int MeowHashSpecializeForCPU(void)
 {
     int Result = 0;
     
-#if defined(MEOW_HASH_512)
+#if defined(_MSC_VER) && defined(MEOW_HASH_512)
     __try
     {
         char Garbage[64];
@@ -36,9 +39,7 @@ int MeowHashSpecializeForCPU(void)
         Result = 512;
     }
     __except(1)
-#endif
-    {
-#if defined(MEOW_HASH_256)
+#elif defined(_MSC_VER) && defined(MEOW_HASH_256)
         __try
         {
             char Garbage[64];
@@ -47,13 +48,13 @@ int MeowHashSpecializeForCPU(void)
             Result = 256;
         }
         __except(1)
-#endif
-        {
-            MeowHash = MeowHash1;
-            Result = 128;
-        }
+#else
+    {
+        MeowHash = MeowHash1;
+        Result = 128;
     }
     
+#endif    
     return(Result);
 }
 
