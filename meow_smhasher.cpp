@@ -2,9 +2,9 @@
 
    meow_smhasher.cpp - smhasher-compatible calls for the Meow hash
    (C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)
-   
+
    See https://mollyrocket.com/meowhash for license and details.
-   
+
    ======================================================================== */
 
 #include <intrin.h>

@@ -2,9 +2,9 @@
 
    meow_example.cpp - basic usage example of the Meow hash
    (C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)
-   
+
    See https://mollyrocket.com/meowhash for details.
-   
+
    ======================================================================== */
 
 // NOTE(casey): Meow relies on definitions for __m128/256/512, so you must
@@ -26,7 +26,7 @@ static meow_hash_implementation *MeowHash = MeowHash1;
 int MeowHashSpecializeForCPU(void)
 {
     int Result = 0;
-    
+
 #if defined(MEOW_HASH_512)
     __try
     {
@@ -53,7 +53,7 @@ int MeowHashSpecializeForCPU(void)
             Result = 128;
         }
     }
-    
+
     return(Result);
 }
 
@@ -69,11 +69,11 @@ int main(int ArgCount, char **Args)
     printf("(C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)\n");
     printf("See https://mollyrocket.com/meowhash for details.\n");
     printf("\n");
-    
+
     // NOTE(casey): Detect which MeowHash to call - do this only once, at startup.
     int BitWidth = MeowHashSpecializeForCPU();
     printf("Using %u-bit Meow implementation\n", BitWidth);
-    
+
     // NOTE(casey): Make something random to hash
     int Size = 16000;
     char *Buffer = (char *)malloc(Size);
@@ -83,15 +83,15 @@ int main(int ArgCount, char **Args)
     {
         Buffer[Index] = (char)Index;
     }
-    
+
     // NOTE(casey): Hash away!
     meow_lane Hash = MeowHash(0, Size, Buffer);
-    
+
     // NOTE(casey): Extract example smaller hash sizes you might want:
     __m128i Hash128 = Hash.L0;
     long long unsigned Hash64 = Hash.Sub[0];
     int unsigned Hash32 = Hash.Sub32[0];
-    
+
     // NOTE(casey): Print the entire 512-bit hash value using the 32-bit accessor
     // (since 64-bit printf is spec'd horribly)
     for(int Offset = 0;

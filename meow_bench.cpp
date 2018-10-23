@@ -2,10 +2,10 @@
 
    meow_bench.cpp - basic RDTSC-based benchmark for the Meow hash
    (C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)
-   
+
    See https://mollyrocket.com/meowhash for details.
    See accompanying meow.inl for license and usage.
-   
+
    ======================================================================== */
 
 #include <intrin.h>
@@ -55,7 +55,7 @@ main(int ArgCount, char **Args)
         named_specialization Specialization = Specializations[SpecializationIndex];
         printf("    %d. %s\n", SpecializationIndex + 1, Specialization.Name);
     }
-    
+
     printf("\n");
     printf("Test results:\n");
     int Size = 32*1024;
@@ -65,7 +65,7 @@ main(int ArgCount, char **Args)
         ++Batch)
     {
         void *Buffer = _aligned_malloc(Size, 128);
-        
+
         for(int SpecializationIndex = 0;
             SpecializationIndex < (sizeof(Specializations)/sizeof(Specializations[0]));
             ++SpecializationIndex)
@@ -81,7 +81,7 @@ main(int ArgCount, char **Args)
                     meow_u64 StartClock = __rdtsc();
                     Specialization.Handler(0, Size, Buffer);
                     meow_u64 EndClock = __rdtsc();
-                    
+
                     meow_u64 Clocks = EndClock - StartClock;
                     if(BestClocks > Clocks)
                     {
@@ -103,9 +103,9 @@ main(int ArgCount, char **Args)
                 }
             }
         }
-        
+
         _aligned_free(Buffer);
-        
+
         Size *= 2;
         TestCount /= 2;
     }
