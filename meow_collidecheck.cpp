@@ -88,6 +88,30 @@ static void perror_str(string s)
     perror(s.c_str());
 }
 
+
+#if defined(WIN32) || defined(_WIN32)
+static void perror_win32(string s) {
+    // https://stackoverflow.com/a/17387176
+    // modified a bit to simply output the message
+    string message;
+
+    DWORD errorMessageID = ::GetLastError();
+    if (errorMessageID == 0) {
+        goto output_message;
+    }
+
+    LPSTR messageBuffer = nullptr;
+    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                 NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
+
+    message = string(messageBuffer, size);
+    LocalFree(messageBuffer);
+
+output_message:
+    cerr << s << ": " << message;
+}
+#endif
+
 static const char * human_size(uint64_t bytes)
 {
     // credit: @dgoguerra (GH)
@@ -109,7 +133,7 @@ static const char * human_size(uint64_t bytes)
     return output;
 }
 
-static void hash_dir(dirptr &dir, string root, unordered_set<meow_lane> &collisions, unordered_map<meow_lane, list<pair<string, string>>> &hashes, size_t &checked_files, uint64_t &total_size)
+static void hash_dir(dirptr &dir, string root, unordered_set<meow_lane> &collisions, unordered_map<meow_lane, list<string>> &hashes, unordered_set<string> &sha512_hashes, size_t &checked_files, uint64_t &total_size)
 {
     // NOTE(qix-): allows us to lazily build up the string exactly once
     //             and skip cases where the entity type isn't a regular
@@ -147,7 +171,7 @@ static void hash_dir(dirptr &dir, string root, unordered_set<meow_lane> &collisi
                 continue;
             }
 
-            hash_dir(nextdir, NEXT_PATH, collisions, hashes, checked_files, total_size);
+            hash_dir(nextdir, NEXT_PATH, collisions, hashes, sha512_hashes, checked_files, total_size);
         } else if (ent->d_type == DT_REG) {
             // regular file entity
             fdptr ffd = openat(dfd, &ent->d_name[0], O_RDONLY | O_BINARY | O_NOFOLLOW);
@@ -156,9 +180,45 @@ static void hash_dir(dirptr &dir, string root, unordered_set<meow_lane> &collisi
                 continue;
             }
 
+            void *data_to_hash = nullptr;
+            size_t length_to_hash;
+
 #if defined(WIN32) || defined(_WIN32)
-            // TODO(qix-): sorry I don't have windows D:
-            #error "mmapping isn't supported on windows yet"
+            HANDLE open_win32_handle = (HANDLE) _get_osfhandle(ffd.fd);
+            if (open_win32_handle == INVALID_HANDLE_VALUE) {
+                perror_str("could not convert stdc fd to windows handle: " + NEXT_PATH);
+                continue;
+            }
+
+            // NOTE(qix-): we opt to manually manage handles here since the Win32 API is a bit
+            //             awkward when it comes to file views
+            ffd.fd = -1; // don't do anything upon destruction
+
+            HANDLE file_mapping = CreateFileMappingA(open_win32_handle, PAGE_READONLY, 0, 0);
+            if (file_mapping == NULL) {
+                perror_win32("could not create file mapping: " + NEXT_PATH);
+                CloseHandle(open_win32_handle);
+                continue;
+            }
+
+            DWORD data_size = GetFileSize(open_win32_handle, NULL); // TODO(qix-): Should we support high-order dword values for sizes?
+            if (data_ptr == INVALID_FILE_SIZE) {
+                perror_win32("could not retrieve file size: " + NEXT_PATH);
+                CloseHandle(file_mapping);
+                CloseHandle(open_win32_handle);
+                continue;
+            }
+
+            LPVOID data_ptr = MapViewOfFile(file_mapping, FILE_MAP_READ, 0, 0, 0);
+            if (data_ptr == NULL) {
+                perror_win32("could not map file view: " + NEXT_PATH);
+                CloseHandle(file_mapping);
+                CloseHandle(open_win32_handle);
+                continue;
+            }
+
+            data_to_hash = data_ptr;
+            length_to_hash = data_size;
 #else
             struct stat filestat;
             if (fstat(ffd.fd, &filestat) == -1) {
@@ -172,30 +232,38 @@ static void hash_dir(dirptr &dir, string root, unordered_set<meow_lane> &collisi
                 continue;
             }
 
-            meow_lane result = MeowHash1(0, baseptr.len, baseptr.ptr);
-            string result_sha512 = sha512(string((char *) baseptr.ptr, baseptr.len));
-            auto &hashlist = hashes[result];
-            if (hashlist.size() > 0) {
-                // skip if its sha512 is already in there as we don't need to report duplicate
-                // files as collisions.
-                for (const auto &filemeta : hashlist) {
-                    if (filemeta.second == result_sha512) {
-                        goto skip_file;
-                    }
+            data_to_hash = baseptr.ptr;
+            length_to_hash = baseptr.len;
+#endif
+
+            string result_sha512 = sha512(string((char *) data_to_hash, length_to_hash));
+            const auto sha512_insertion = sha512_hashes.insert(result_sha512);
+            if (!sha512_insertion.second) {
+                // we're looking at duplicate information; don't consider it.
+                goto skip_file;
+            }
+
+            {
+                meow_lane result = MeowHash1(0, length_to_hash, data_to_hash);
+                auto &hashlist = hashes[result];
+                if (hashlist.size() > 0) {
+                    collisions.insert(result);
                 }
 
-                collisions.insert(result);
-                goto insert_file;
-            } else {
-insert_file:
-                hashlist.push_back(make_pair(NEXT_PATH, result_sha512));
+                hashlist.push_back(NEXT_PATH);
             }
 
 skip_file:
-            total_size += filestat.st_size;
-#endif
-
             ++checked_files;
+            total_size += length_to_hash;
+
+#if defined(WIN32) || defined(_WIN32)
+            UnmapViewOfFile(data_ptr);
+            CloseHandle(file_mapping);
+            CloseHandle(open_win32_handle);
+#else
+            // no cleanup necessary; handled with destructors.
+#endif
         }
 
         // NOTE(qix-): we purposefully ignore anything that isn't a
@@ -230,7 +298,8 @@ usage:
     size_t checked_files = 0;
     uint64_t total_size = 0;
     unordered_set<meow_lane> collisions;
-    unordered_map<meow_lane, list<pair<string, string>>> hashes; // <meow_lane, [<filename, sha512_hash>]>
+    unordered_set<string> sha512_hashes;
+    unordered_map<meow_lane, list<string>> hashes;
 
     dirptr root_dir = opendir(cwd);
     if (root_dir.d == NULL) {
@@ -245,17 +314,18 @@ usage:
         cwd[cwdlen - 1] = 0;
     }
 
-    hash_dir(root_dir, cwd, collisions, hashes, checked_files, total_size);
+    hash_dir(root_dir, cwd, collisions, hashes, sha512_hashes, checked_files, total_size);
 
     cerr << "num. files hashed:  " << checked_files << endl;
+    cerr << "num considered:     " << sha512_hashes.size() << endl;
+    cerr << "num skipped:        " << (checked_files - sha512_hashes.size()) << endl;
     cerr << "total bytes hashed: " << total_size << " (" << human_size(total_size) << ")" << endl;
     cerr << "collisions:         " << collisions.size() << endl;
 
     for (const auto &collision : collisions) {
         cout << collision << endl;
-        for (const auto &filemeta : hashes[collision]) {
-            cout << "\t" << filemeta.first << endl;
-            cout << "\t\t" << filemeta.second << endl;
+        for (const auto &filename : hashes[collision]) {
+            cout << "\t" << filename << endl;
         }
     }
 
