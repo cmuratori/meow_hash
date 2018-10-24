@@ -118,7 +118,6 @@
 
    To hash a block of data, call a MeowHash implementation:
 
-       #include <intrin.h>
        #include "meow_hash.h"
 
        // Always available
@@ -237,6 +236,35 @@ MEOW_HASH_SPECIALIZED(meow_u64 Seed, meow_u64 Len, void *SourceInit)
 #undef MEOW_HASH_SPECIALIZED
 
 #else
+
+
+// NOTE(casey): Meow relies on definitions for __m128/256/512, so you must
+//              have those defined either in your own include files or via
+//              a standard .h
+// NOTE(qix-): define MEOW_NOINTERN if you don't want us to include intrinsics for you
+#if !defined(MEOW_NOINTRIN)
+    /* https://stackoverflow.com/a/22291538 */
+    #if defined(_MSC_VER)
+         /* Microsoft C/C++-compatible compiler */
+         #include <intrin.h>
+    #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+         /* GCC-compatible compiler, targeting x86/x86-64 */
+         #include <x86intrin.h>
+    #elif defined(__GNUC__) && defined(__ARM_NEON__)
+         /* GCC-compatible compiler, targeting ARM with NEON */
+         #include <arm_neon.h>
+    #elif defined(__GNUC__) && defined(__IWMMXT__)
+         /* GCC-compatible compiler, targeting ARM with WMMX */
+         #include <mmintrin.h>
+    #elif (defined(__GNUC__) || defined(__xlC__)) && (defined(__VEC__) || defined(__ALTIVEC__))
+         /* XLC or GCC-compatible compiler, targeting PowerPC with VMX/VSX */
+         #include <altivec.h>
+    #elif defined(__GNUC__) && defined(__SPE__)
+         /* GCC-compatible compiler, targeting PowerPC with SPE */
+         #include <spe.h>
+    #endif
+#endif
+
 
 #if !defined(MEOW_HASH_TYPES)
 #define MEOW_HASH_VERSION 1

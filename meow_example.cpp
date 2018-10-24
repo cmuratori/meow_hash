@@ -7,10 +7,6 @@
 
    ======================================================================== */
 
-// NOTE(casey): Meow relies on definitions for __m128/256/512, so you must
-// have those defined either in your own include files or via a standard .h:
-#include <intrin.h>
-
 // NOTE(casey): We ask for all three versions here - if you only want the
 // 128-bit version, you can omit the two #define's.
 #define MEOW_HASH_256
