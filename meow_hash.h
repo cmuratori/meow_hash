@@ -273,6 +273,42 @@ union meow_lane
 
 typedef meow_lane meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *SourceInit);
 
+namespace std {
+    template <>
+    struct hash<meow_lane>
+    {
+        std::size_t operator()(const meow_lane& k) const
+        {
+            using std::size_t;
+
+            // NOTE(qix-): branch will be optimized out at compilation time
+            switch (sizeof(std::size_t)) {
+                static_assert((sizeof(std::size_t) == 4 || sizeof(std::size_t) == 8),
+                    "size_t is something other than 32 or 64 bits - please add a hashing implementation");
+            case 4:
+                return k.Sub32[0 ] ^ k.Sub32[1 ] ^ k.Sub32[2 ] ^ k.Sub32[3 ] ^
+                       k.Sub32[4 ] ^ k.Sub32[5 ] ^ k.Sub32[6 ] ^ k.Sub32[7 ] ^
+                       k.Sub32[8 ] ^ k.Sub32[9 ] ^ k.Sub32[10] ^ k.Sub32[11] ^
+                       k.Sub32[12] ^ k.Sub32[13] ^ k.Sub32[14] ^ k.Sub32[15];
+            case 8:
+                return k.Sub[0] ^ k.Sub[1] ^ k.Sub[2] ^ k.Sub[3] ^
+                       k.Sub[4] ^ k.Sub[5] ^ k.Sub[6] ^ k.Sub[7];
+            }
+        }
+    };
+}
+
+inline bool operator ==(const meow_lane &left, const meow_lane &right) {
+    return    left.Sub[0] == right.Sub[0]
+           && left.Sub[1] == right.Sub[1]
+           && left.Sub[2] == right.Sub[2]
+           && left.Sub[3] == right.Sub[3]
+           && left.Sub[4] == right.Sub[4]
+           && left.Sub[5] == right.Sub[5]
+           && left.Sub[6] == right.Sub[6]
+           && left.Sub[7] == right.Sub[7];
+}
+
 #define MEOW_HASH_TYPES
 #endif
 
