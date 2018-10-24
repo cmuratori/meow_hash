@@ -16,3 +16,5 @@ if (WIN32)
     add_executable (meow_bench meow_bench.cpp)
     add_executable (meow_example meow_example.cpp)
 endif ()
+
+add_executable (meow_collidecheck meow_collidecheck.cpp sha512.cpp)
