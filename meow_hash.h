@@ -452,8 +452,9 @@ MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengt
 static meow_hash
 MeowHashViaOp(meow_macroblock_op *Op, meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
 {
-    // NOTE(casey): Initialize all 16 streams to 0
-    meow_macroblock_result Group = {};
+    // NOTE(casey): Initialize all streams to zero (probably could do this more efficiently, since
+    // most of the time it isn't necessary).
+    meow_macroblock_result Group = {0};
     
     // NOTE(casey): Reserve some space for individual macroblock hashes
     meow_macroblock_result SubGroup;
@@ -462,7 +463,7 @@ MeowHashViaOp(meow_macroblock_op *Op, meow_u64 Seed, meow_u64 TotalLengthInBytes
     // The 256-byte blocks are to ensure good pipelining on future AVX-512 chips.
     // The 1-megabyte macroblocks are to allow (other, distributed) implementations
     // to hash asynchronously across many cores and assemble at the end.
-    int First = true;
+    int First = 1;
     meow_source_blocks Counts = MeowSourceBlocksFor(TotalLengthInBytes, SourceInit);
     meow_u8 *Source = Counts.Source;
     meow_u64 BlockCount = Counts.BlockCount;
@@ -482,7 +483,7 @@ MeowHashViaOp(meow_macroblock_op *Op, meow_u64 Seed, meow_u64 TotalLengthInBytes
             // and then merge the hash from there.  This makes the routine clumsier, but probably
             // makes the hash better, so we grin and bear it.
             Group = Op(SubBlockCount, Source);
-            First = false;
+            First = 0;
         }
         else
         {
@@ -522,7 +523,7 @@ MeowHashMergeArray(meow_u64 MacroBlockCount, meow_macroblock_result *MacroBlockH
     else
     {
         // NOTE(casey): Do the nullification in two steps to support older compilers (MSVC 2012, etc.)
-        meow_macroblock_result NullGroup = {};
+        meow_macroblock_result NullGroup = {0};
         Result = NullGroup;
     }
     
