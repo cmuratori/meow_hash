@@ -68,6 +68,22 @@ struct best_result
     meow_u64 Clocks;
 };
 
+static void
+FuddleBuffer(meow_u64 Size, void *Buffer)
+{
+    // NOTE(casey): This code is here for literally no purpose other than to prevent CLANG from
+    // optimizing out loads, since apparently it thinks it doesn't have to actually read from
+    // uninitialized memory, WHICH IS ABSURD and this whole undefined behavior thing is completely
+    // unacceptable.  Spec writers are ALL FIRED.
+    meow_u8 *Dest = (meow_u8 *)Buffer;
+    for(meow_u64 Index = 0;
+        Index < Size;
+        ++Index)
+    {
+        Dest[Index] = 13*Index;
+    }
+}
+
 int
 main(int ArgCount, char **Args)
 {
@@ -145,6 +161,7 @@ main(int ArgCount, char **Args)
             void *Buffer = aligned_alloc(MEOW_HASH_ALIGNMENT, Size);
             if(Buffer)
             {
+                FuddleBuffer(Size, Buffer);
                 fprintf(stderr, "  Fewest cycles to hash ");
                 PrintSize(stderr, Size, false);
                 fprintf(stderr, ":\n");
@@ -303,6 +320,7 @@ main(int ArgCount, char **Args)
             ++ThreadCount)
         {
             void *Buffer = aligned_alloc(MEOW_HASH_ALIGNMENT, Size);
+            FuddleBuffer(Size, Buffer);
             meow_hash ReferenceHash = MeowHash1(0, Size, Buffer);
             Work = MeowSourceBlocksFor(Size, Buffer);
             
