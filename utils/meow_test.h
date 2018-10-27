@@ -11,7 +11,7 @@
 #include <intrin.h>
 #define TRY __try
 #define CATCH __except(1)
-#define malloc(a) _aligned_malloc(4,a)
+#define malloc(a) _aligned_malloc(a,16)
 #define aligned_alloc(a,b) _aligned_malloc(b,a)
 #define free _aligned_free
 #else
@@ -19,18 +19,6 @@
 #define TRY try
 #define CATCH catch(...)
 #endif
-
-#if __APPLE__
-// NOTE: Apple Xcode/clang seems to not include aligned_alloc in the standard
-// library, so emulate via posix_memalign.
-static void* aligned_alloc(size_t alignment, size_t size)
-{
-    void* pointer = 0;
-    posix_memalign(&pointer, alignment, size);
-    return pointer;
-}
-#endif
-
 
 #include "meow_hash.h"
 
