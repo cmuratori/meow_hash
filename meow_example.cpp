@@ -11,13 +11,13 @@
 #include <stdlib.h>
 #include <memory.h>
 
-#if _MSC_VER
+#if _WIN32
 // NOTE(casey): Sadly, Visual Studio STILL doesn't seem to support standard
 // C, so you have to use their weird aligned malloc.
+// NOTE(mmozeiko): gcc/clang on Windows also should use these functions
 #define aligned_alloc(a,b) _aligned_malloc(b,a)
 #define free _aligned_free
-#endif
-#if __APPLE__
+#elif __APPLE__
 // NOTE: Apple Xcode/clang seems to not include aligned_alloc in the standard
 // library, so emulate via posix_memalign.
 static void* aligned_alloc(size_t alignment, size_t size)

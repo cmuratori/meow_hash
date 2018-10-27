@@ -11,9 +11,6 @@
 #include <intrin.h>
 #define TRY __try
 #define CATCH __except(1)
-#define malloc(a) _aligned_malloc(a,16)
-#define aligned_alloc(a,b) _aligned_malloc(b,a)
-#define free _aligned_free
 #else
 #include <x86intrin.h>
 #define TRY try
@@ -29,6 +26,13 @@ static void* aligned_alloc(size_t alignment, size_t size)
     posix_memalign(&pointer, alignment, size);
     return pointer;
 }
+#elif _WIN32
+// NOTE(mmozeiko): MSVC/gcc/clang on Windows should use _aligned_...
+// functions from functions stdlib.h
+#include <stdlib.h>
+#define malloc(a) _aligned_malloc(a,16)
+#define aligned_alloc(a,b) _aligned_malloc(b,a)
+#define free _aligned_free
 #endif
 
 #include "meow_hash.h"
