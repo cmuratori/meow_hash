@@ -106,13 +106,14 @@ int MeowHashSpecializeForCPU(void)
 //   CompareTwoFiles - have Meow hash the contents of two files, and check for equivalence
 
 static void
-PrintHash(meow_hash Hash)
+PrintHash(meow_u128 Hash)
 {
+    meow_u32 *HashU32 = (meow_u32 *)&Hash;
     printf("    %08X-%08X-%08X-%08X\n",
-           Hash.u32[ 3],
-           Hash.u32[ 2],
-           Hash.u32[ 1],
-           Hash.u32[ 0]);
+           HashU32[3],
+           HashU32[2],
+           HashU32[1],
+           HashU32[0]);
 }
 
 static void
@@ -130,12 +131,11 @@ HashTestBuffer(void)
     }
     
     // NOTE(casey): Ask Meow for the hash
-    meow_hash Hash = MeowHash(0, Size, Buffer);
+    meow_u128 Hash = MeowHash(0, Size, Buffer);
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
-    __m128i Hash128 = Hash.u128;
-    long long unsigned Hash64 = Hash.u64[0];
-    int unsigned Hash32 = Hash.u32[0];
+    long long unsigned Hash64 = MeowU64From(Hash);
+    int unsigned Hash32 = MeowU32From(Hash);
     
     // NOTE(casey): Print the hash
     printf("  Hash of a test buffer:\n");
@@ -152,7 +152,7 @@ HashOneFile(char *FilenameA)
     if(A.Contents)
     {
         // NOTE(casey): Ask Meow for the hash
-        meow_hash HashA = MeowHash(0, A.Size, A.Contents);
+        meow_u128 HashA = MeowHash(0, A.Size, A.Contents);
         
         // NOTE(casey): Print the hash
         printf("  Hash of \"%s\":\n", FilenameA);
@@ -171,8 +171,8 @@ CompareTwoFiles(char *FilenameA, char *FilenameB)
     if(A.Contents && B.Contents)
     {
         // NOTE(casey): Hash both files
-        meow_hash HashA = MeowHash(0, A.Size, A.Contents);
-        meow_hash HashB = MeowHash(0, B.Size, B.Contents);
+        meow_u128 HashA = MeowHash(0, A.Size, A.Contents);
+        meow_u128 HashB = MeowHash(0, B.Size, B.Contents);
         
         // NOTE(casey): Check for match
         int HashesMatch = MeowHashesAreEqual(HashA, HashB);

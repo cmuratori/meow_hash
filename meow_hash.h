@@ -224,7 +224,7 @@
 #endif
 #define MEOW_HASH_TYPES
 
-#define Meow128_AreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A).u128, (B).u128)) == 0xFFFF)
+#define Meow128_AreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A), (B))) == 0xFFFF)
 #define Meow128_AESDEC(Prior, XOr) _mm_aesdec_si128((Prior), (XOr))
 #define Meow128_AESDEC_Mem(Prior, XOrPtr) _mm_aesdec_si128((Prior), *(meow_u128 *)(XOrPtr))
 #define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
@@ -246,18 +246,11 @@
 #endif
 
 #define MEOW_HASH_VERSION 3
-#define MEOW_HASH_VERSION_NAME "0.3/Snowshoe"
+#define MEOW_HASH_VERSION_NAME "0.3/snowshoe"
 #define MEOW_HASH_ALIGNMENT 128
 #define MEOW_HASH_MACROBLOCK_COUNT 4096
 #define MEOW_HASH_MACROBLOCK_SIZE (MEOW_HASH_MACROBLOCK_COUNT << MEOW_HASH_BLOCK_SIZE_SHIFT)
 #define MEOW_HASH_BLOCK_SIZE_SHIFT 8
-
-typedef union meow_hash
-{
-    meow_u128 u128;
-    meow_u64 u64[2];
-    meow_u32 u32[4];
-} meow_hash;
 
 typedef struct meow_source_blocks
 {
@@ -297,13 +290,32 @@ typedef struct meow_macroblock_result
 } meow_macroblock_result;
 
 typedef meow_macroblock_result meow_macroblock_op(int BlockCount, meow_u8 *Source);
-typedef meow_hash meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *SourceInit);
+typedef meow_u128 meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *SourceInit);
+
+//
+// NOTE(casey): Smaller hash extraction
+//
+static meow_u64
+MeowU64From(meow_u128 Hash)
+{
+    // TODO(casey): It is probably worth it to use the cvt intrinsics here
+    meow_u64 Result = *(meow_u64 *)&Hash;
+    return(Result);
+}
+
+static meow_u32
+MeowU32From(meow_u128 Hash)
+{
+    // TODO(casey): It is probably worth it to use the cvt intrinsics here
+    meow_u32 Result = *(meow_u32 *)&Hash;
+    return(Result);
+}
 
 //
 // NOTE(casey): "Fast" comparison (using SSE)
 //
 static int
-MeowHashesAreEqual(meow_hash A, meow_hash B)
+MeowHashesAreEqual(meow_u128 A, meow_u128 B)
 {
     int Result = Meow128_AreEqual(A, B);
     return(Result);
@@ -368,7 +380,7 @@ MeowHashMerge(meow_macroblock_result *A, meow_macroblock_result *B)
     A->SF = Meow128_AESDEC(A->SF, B->SF);
 }
 
-static meow_hash
+static meow_u128
 MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengthInBytes, int Overhang, meow_u8 *Source)
 {
     meow_u128 S0 = State->S0;
@@ -455,13 +467,10 @@ MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengt
     M0 = Meow128_AESDEC(M0, Mixer);
     M0 = Meow128_AESDEC(M0, Mixer);
     
-    meow_hash Result;
-    Result.u128 = M0;
-    
-    return(Result);
+    return(M0);
 }
 
-static meow_hash
+static meow_u128
 MeowHashViaOp(meow_macroblock_op *Op, meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
 {
     // NOTE(casey): Initialize all streams to zero (probably could do this more efficiently, since
@@ -512,7 +521,7 @@ MeowHashViaOp(meow_macroblock_op *Op, meow_u64 Seed, meow_u64 TotalLengthInBytes
     }
     
     // NOTE(casey): Hash any residual data and finalize
-    meow_hash Result = MeowHashFinish(&Group, Seed, Counts.TotalLengthInBytes, Counts.Overhang, Source);
+    meow_u128 Result = MeowHashFinish(&Group, Seed, Counts.TotalLengthInBytes, Counts.Overhang, Source);
     
     return(Result);
 }
@@ -609,7 +618,7 @@ MeowHash1Op(int BlockCount, meow_u8 *Source)
     return(Result);
 }
 
-static meow_hash
+static meow_u128
 MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
 {
     //
@@ -696,6 +705,7 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
         case  1: S0 = Meow128_AESDEC_Mem(S0, Source);
         default:;
     }
+    Source += (Len & 0xF0);
     
     //
     // NOTE(casey): Do the first half of the mixdown
@@ -715,73 +725,123 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
     // NOTE(casey): Deal with individual bytes
     //
     
-    if(Len & 0xF)
+    // TODO(casey): Probably do a different code path for ARM here!
+    // Do they have proper masked gather?
+    switch(Len & 0xF)
     {
-        Source += (Len & 0xF0);
-        
-        // TODO(casey): Probably do a different code path for ARM here!
-        // Do they have proper masked gather?
-        
-        // NOTE(casey): If the buffer is smaller than 16 bytes, we have to actually
-        // build a 128-bit value piece by piece to avoid out-of-bounds reads.
-        // Eventually this could be replaced with a masked gather, once they are
-        // a commonly supported operation (wishful thinking :/ )
-        meow_u128 Partial = Meow128_Zero();
-        switch(Len & 0xF)
+        case 15:
         {
-            case 15:
+            meow_u128 Partial = _mm_loadu_si64(Source);
             Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 14), 14);
-            case 14:
             Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 12), 6);
             Partial = _mm_insert_epi32(Partial, *(meow_u32 *)(Source + 8), 2);
-            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
-            break;
-            
-            case 13:
-            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 12), 12);
-            case 12:
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case 14:
+        {
+            meow_u128 Partial = _mm_loadu_si64(Source);
+            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 12), 6);
             Partial = _mm_insert_epi32(Partial, *(meow_u32 *)(Source + 8), 2);
-            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
-            break;
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case 13:
+        {
+            meow_u128 Partial = _mm_loadu_si64(Source);
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 12), 12);
+            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)(Source + 8), 2);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case 12:
+        {
+            meow_u128 Partial = _mm_loadu_si64(Source);
+            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)(Source + 8), 2);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
             
-            case 11:
+        case 11:
+        {
+            meow_u128 Partial = _mm_loadu_si64(Source);
             Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 10), 10);
-            case 10:
             Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 4), 4);
-            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
-            break;
-            
-            case  9:
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case 10:
+        {
+            meow_u128 Partial = _mm_loadu_si64(Source);
+            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 4), 4);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  9:
+        {
+            meow_u128 Partial = _mm_loadu_si64(Source);
             Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 8), 8);
-            case  8:
-            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
-            break;
-            
-            case  7:
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  8:
+        {
+            meow_u128 Partial = _mm_loadu_si64(Source);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  7:
+        {
+            meow_u128 Partial = _mm_loadu_si32(Source);
             Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 7), 7);
-            case  6:
             Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 2), 2);
-            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)Source, 0);
-            break;
-            
-            case  5:
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  6:
+        {
+            meow_u128 Partial = _mm_loadu_si32(Source);
+            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 2), 2);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  5:
+        {
+            meow_u128 Partial = _mm_loadu_si32(Source);
             Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 4), 4);
-            case  4:
-            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)Source, 0);
-            break;
-            
-            case  3:
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  4:
+        {
+            meow_u128 Partial = _mm_loadu_si32(Source);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  3:
+        {
+            meow_u128 Partial = _mm_loadu_si16(Source);
             Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 2), 2);
-            case  2:
-            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)Source, 0);
-            break;
-            
-            case  1:
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  2:
+        {
+            meow_u128 Partial = _mm_loadu_si16(Source);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        case  1:
+        {
+            meow_u128 Partial = Meow128_Zero();
             Partial = _mm_insert_epi8(Partial, *(meow_u8 *)Source, 0);
-        }
-    
-        SF = Meow128_AESDEC(SF, Partial);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+        
+        default:
+        {
+        } break;
     }
+    
     
     //
     // NOTE(casey): Do the second half of the mixdown
@@ -804,10 +864,14 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
     M0 = Meow128_AESDEC(M0, Mixer);
     M0 = Meow128_AESDEC(M0, Mixer);
     
+#if 0
     meow_hash Result;
     Result.u128 = M0;
     
     return(Result);
+#else
+    return(M0);
+#endif
 }
 
 #if MEOW_HASH_AVX512
@@ -858,11 +922,11 @@ MeowHash2Op(int BlockCount, meow_u8 *Source)
     return(Result);
 }
 
-static meow_hash
+static meow_u128
 MeowHash2(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *Source)
 {
     // TODO(casey): Once we can test, do the optimized non-megabyte version for 256-bit
-    meow_hash Result = MeowHashViaOp(MeowHash2Op, Seed, TotalLengthInBytes, Source);
+    meow_u128 Result = MeowHashViaOp(MeowHash2Op, Seed, TotalLengthInBytes, Source);
     return(Result);
 }
 
@@ -897,11 +961,11 @@ MeowHash4Op(int BlockCount, meow_u8 *Source)
     return(Result);
 }
 
-static meow_hash
+static meow_u128
 MeowHash4(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *Source)
 {
     // TODO(casey): Once we can test, do the optimized non-megabyte version for 512-bit
-    meow_hash Result = MeowHashViaOp(MeowHash4Op, Seed, TotalLengthInBytes, Source);
+    meow_u128 Result = MeowHashViaOp(MeowHash4Op, Seed, TotalLengthInBytes, Source);
     return(Result);
 }
 
