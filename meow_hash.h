@@ -146,11 +146,11 @@
        // if you are not compiling for platforms with AVX support!
        
        // Always available
-       meow_lane MeowHash1(u64 Seed, u64 Len, void *Source);
+       meow_hash MeowHash1(u64 Seed, u64 Len, void *Source);
        
        // Available only when compiling with AVX extensions
-       meow_lane MeowHash2(u64 Seed, u64 Len, void *Source);
-       meow_lane MeowHash4(u64 Seed, u64 Len, void *Source);
+       meow_hash MeowHash2(u64 Seed, u64 Len, void *Source);
+       meow_hash MeowHash4(u64 Seed, u64 Len, void *Source);
        
    MeowHash1 is 128-bit wide AES-NI.  MeowHash2 is 256-bit wide VAES.
    MeowHash4 is 512-bit wide VAES.  As of the initial publication of
@@ -158,7 +158,7 @@
    are for future use and internal x64 vendor testing.
    
    Calling MeowHash* with a seed, length, and source pointer invokes the
-   hash and returns a meow_lane union which contains the 128-bit result
+   hash and returns a meow_hash union which contains the 128-bit result
    accessible in a number of ways (u32[4], u64[2], _m128i).  From there
    you can pull out what you want and discard the rest, as the Meow hash
    is designed to produce high-quality hashes when truncated down to
@@ -214,6 +214,7 @@
 
 #if !defined(MEOW_HASH_TYPES)
 #define meow_u8 char unsigned
+#define meow_u16 short unsigned
 #define meow_u32 int unsigned
 #define meow_u64 long long unsigned
 #define meow_u128 __m128i
@@ -222,6 +223,26 @@
 #define meow_u512 __m512i
 #endif
 #define MEOW_HASH_TYPES
+
+#define Meow128_AreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A).u128, (B).u128)) == 0xFFFF)
+#define Meow128_AESDEC(Prior, XOr) _mm_aesdec_si128((Prior), (XOr))
+#define Meow128_AESDEC_Mem(Prior, XOrPtr) _mm_aesdec_si128((Prior), *(meow_u128 *)(XOrPtr))
+#define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
+#define Meow128_LoadUnaligned(Ptr) _mm_loadu_si128((meow_u128 *)(Ptr))
+
+// TODO(casey): Not sure if this should actually be Meow128_Zero(A) ((A) = _mm_setzero_si128()), maybe
+#define Meow128_Zero() _mm_setzero_si128()
+
+#define Meow256_AESDEC(Prior, XOr) _mm256_aesdec_epi128((Prior), (XOr))
+#define Meow256_AESDEC_Mem(Prior, XOrPtr) _mm256_aesdec_epi128((Prior), *(meow_u256 *)(XOrPtr))
+#define Meow256_Store(Value, Ptr) _mm256_store_si256((meow_u256 *)(Ptr), (Value));
+#define Meow256_Zero() _mm256_setzero_si256()
+
+#define Meow512_AESDEC(Prior, XOr) _mm512_aesdec_epi128((Prior), (XOr))
+#define Meow512_AESDEC_Mem(Prior, XOrPtr) _mm512_aesdec_epi128((Prior), *(meow_u256 *)(XOrPtr))
+#define Meow512_Store(Value, Ptr) _mm256_store_si256((meow_u512 *)(Ptr), (Value));
+#define Meow512_Zero() _mm512_setzero_si512()
+
 #endif
 
 #define MEOW_HASH_VERSION 2
@@ -284,8 +305,7 @@ typedef meow_hash meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *So
 static int
 MeowHashesAreEqual(meow_hash A, meow_hash B)
 {
-    int Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(A.u128, B.u128));
-    int Result = (Mask == 0xFFFF);
+    int Result = Meow128_AreEqual(A, B);
     return(Result);
 }
 
@@ -330,22 +350,22 @@ MeowGetMacroblock(meow_source_blocks volatile *Blocks, meow_u64 Index)
 static void
 MeowHashMerge(meow_macroblock_result *A, meow_macroblock_result *B)
 {
-    A->S0 = _mm_aesdec_si128(A->S0, B->S0);
-    A->S1 = _mm_aesdec_si128(A->S1, B->S1);
-    A->S2 = _mm_aesdec_si128(A->S2, B->S2);
-    A->S3 = _mm_aesdec_si128(A->S3, B->S3);
-    A->S4 = _mm_aesdec_si128(A->S4, B->S4);
-    A->S5 = _mm_aesdec_si128(A->S5, B->S5);
-    A->S6 = _mm_aesdec_si128(A->S6, B->S6);
-    A->S7 = _mm_aesdec_si128(A->S7, B->S7);
-    A->S8 = _mm_aesdec_si128(A->S8, B->S8);
-    A->S9 = _mm_aesdec_si128(A->S9, B->S9);
-    A->SA = _mm_aesdec_si128(A->SA, B->SA);
-    A->SB = _mm_aesdec_si128(A->SB, B->SB);
-    A->SC = _mm_aesdec_si128(A->SC, B->SC);
-    A->SD = _mm_aesdec_si128(A->SD, B->SD);
-    A->SE = _mm_aesdec_si128(A->SE, B->SE);
-    A->SF = _mm_aesdec_si128(A->SF, B->SF);
+    A->S0 = Meow128_AESDEC(A->S0, B->S0);
+    A->S1 = Meow128_AESDEC(A->S1, B->S1);
+    A->S2 = Meow128_AESDEC(A->S2, B->S2);
+    A->S3 = Meow128_AESDEC(A->S3, B->S3);
+    A->S4 = Meow128_AESDEC(A->S4, B->S4);
+    A->S5 = Meow128_AESDEC(A->S5, B->S5);
+    A->S6 = Meow128_AESDEC(A->S6, B->S6);
+    A->S7 = Meow128_AESDEC(A->S7, B->S7);
+    A->S8 = Meow128_AESDEC(A->S8, B->S8);
+    A->S9 = Meow128_AESDEC(A->S9, B->S9);
+    A->SA = Meow128_AESDEC(A->SA, B->SA);
+    A->SB = Meow128_AESDEC(A->SB, B->SB);
+    A->SC = Meow128_AESDEC(A->SC, B->SC);
+    A->SD = Meow128_AESDEC(A->SD, B->SD);
+    A->SE = Meow128_AESDEC(A->SE, B->SE);
+    A->SF = Meow128_AESDEC(A->SF, B->SF);
 }
 
 static meow_hash
@@ -371,21 +391,21 @@ MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengt
     // NOTE(casey): Handle as many full 128-bit lanes as possible
     switch(Overhang >> 4)
     {
-        case 15: SE = _mm_aesdec_si128(SE, *(meow_u128 *)(Source + 224));
-        case 14: SD = _mm_aesdec_si128(SD, *(meow_u128 *)(Source + 208));
-        case 13: SC = _mm_aesdec_si128(SC, *(meow_u128 *)(Source + 192));
-        case 12: SB = _mm_aesdec_si128(SB, *(meow_u128 *)(Source + 176));
-        case 11: SA = _mm_aesdec_si128(SA, *(meow_u128 *)(Source + 160));
-        case 10: S9 = _mm_aesdec_si128(S9, *(meow_u128 *)(Source + 144));
-        case  9: S8 = _mm_aesdec_si128(S8, *(meow_u128 *)(Source + 128));
-        case  8: S7 = _mm_aesdec_si128(S7, *(meow_u128 *)(Source + 112));
-        case  7: S6 = _mm_aesdec_si128(S6, *(meow_u128 *)(Source + 96));
-        case  6: S5 = _mm_aesdec_si128(S5, *(meow_u128 *)(Source + 80));
-        case  5: S4 = _mm_aesdec_si128(S4, *(meow_u128 *)(Source + 64));
-        case  4: S3 = _mm_aesdec_si128(S3, *(meow_u128 *)(Source + 48));
-        case  3: S2 = _mm_aesdec_si128(S2, *(meow_u128 *)(Source + 32));
-        case  2: S1 = _mm_aesdec_si128(S1, *(meow_u128 *)(Source + 16));
-        case  1: S0 = _mm_aesdec_si128(S0, *(meow_u128 *)(Source));
+        case 15: SE = Meow128_AESDEC_Mem(SE, Source + 224);
+        case 14: SD = Meow128_AESDEC_Mem(SD, Source + 208);
+        case 13: SC = Meow128_AESDEC_Mem(SC, Source + 192);
+        case 12: SB = Meow128_AESDEC_Mem(SB, Source + 176);
+        case 11: SA = Meow128_AESDEC_Mem(SA, Source + 160);
+        case 10: S9 = Meow128_AESDEC_Mem(S9, Source + 144);
+        case  9: S8 = Meow128_AESDEC_Mem(S8, Source + 128);
+        case  8: S7 = Meow128_AESDEC_Mem(S7, Source + 112);
+        case  7: S6 = Meow128_AESDEC_Mem(S6, Source + 96);
+        case  6: S5 = Meow128_AESDEC_Mem(S5, Source + 80);
+        case  5: S4 = Meow128_AESDEC_Mem(S4, Source + 64);
+        case  4: S3 = Meow128_AESDEC_Mem(S3, Source + 48);
+        case  3: S2 = Meow128_AESDEC_Mem(S2, Source + 32);
+        case  2: S1 = Meow128_AESDEC_Mem(S1, Source + 16);
+        case  1: S0 = Meow128_AESDEC_Mem(S0, Source);
         default:;
     }
 
@@ -394,54 +414,46 @@ MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengt
     // in the non-macroblock version of the hash.
     if(Overhang & 0xF)
     {
-        if(TotalLengthInBytes >= 16)
-        {
-            Source += (Overhang - 16);
-            Overhang = 16;
-        }
-        else
-        {
-            Source += (Overhang & 0xF0);
-            Overhang &= 0xF;
-        }
-    
-        meow_u128 Partial = _mm_setzero_si128();
+        Source += (Overhang & 0xF0);
+        Overhang &= 0xF;
+        
+        meow_u128 Partial = Meow128_Zero();
         meow_u8 *Dest = (meow_u8 *)&Partial;
         while(Overhang--)
         {
             *Dest++ = *Source++;
         }
 
-        SF = _mm_aesdec_si128(SF, Partial);
+        SF = Meow128_AESDEC(SF, Partial);
     }
     
     // NOTE(casey): Combine the 16 streams into a single hash to spread the bits out evenly
     meow_u128 M0 = S7;
-    M0 = _mm_aesdec_si128(M0, SA);
-    M0 = _mm_aesdec_si128(M0, S4);
-    M0 = _mm_aesdec_si128(M0, S5);
-    M0 = _mm_aesdec_si128(M0, SC);
-    M0 = _mm_aesdec_si128(M0, S8);
-    M0 = _mm_aesdec_si128(M0, S0);
-    M0 = _mm_aesdec_si128(M0, S1);
-    M0 = _mm_aesdec_si128(M0, S9);
-    M0 = _mm_aesdec_si128(M0, SD);
-    M0 = _mm_aesdec_si128(M0, S2);
-    M0 = _mm_aesdec_si128(M0, S6);
-    M0 = _mm_aesdec_si128(M0, SE);
-    M0 = _mm_aesdec_si128(M0, S3);
-    M0 = _mm_aesdec_si128(M0, SB);
-    M0 = _mm_aesdec_si128(M0, SF);
+    M0 = Meow128_AESDEC(M0, SA);
+    M0 = Meow128_AESDEC(M0, S4);
+    M0 = Meow128_AESDEC(M0, S5);
+    M0 = Meow128_AESDEC(M0, SC);
+    M0 = Meow128_AESDEC(M0, S8);
+    M0 = Meow128_AESDEC(M0, S0);
+    M0 = Meow128_AESDEC(M0, S1);
+    M0 = Meow128_AESDEC(M0, S9);
+    M0 = Meow128_AESDEC(M0, SD);
+    M0 = Meow128_AESDEC(M0, S2);
+    M0 = Meow128_AESDEC(M0, S6);
+    M0 = Meow128_AESDEC(M0, SE);
+    M0 = Meow128_AESDEC(M0, S3);
+    M0 = Meow128_AESDEC(M0, SB);
+    M0 = Meow128_AESDEC(M0, SF);
     
     // NOTE(casey): The mixing vector follows falkhash's lead and uses the seed twice, but the second time
     // the length plus one is added to differentiate.  This seemed sensible, but I haven't thought too hard about this,
     // there may be better things to use as a mixer.
-    meow_u128 Mixer = _mm_set_epi64x(Seed + TotalLengthInBytes + 1, Seed - TotalLengthInBytes);
+    meow_u128 Mixer = Meow128_Set64x2(Seed - TotalLengthInBytes, Seed + TotalLengthInBytes + 1);
     
     // NOTE(casey): Repeat AES thrice to ensure diffusion to all 128 bits (using the Mixer, so the seed and length come in)
-    M0 = _mm_aesdec_si128(M0, Mixer);
-    M0 = _mm_aesdec_si128(M0, Mixer);
-    M0 = _mm_aesdec_si128(M0, Mixer);
+    M0 = Meow128_AESDEC(M0, Mixer);
+    M0 = Meow128_AESDEC(M0, Mixer);
+    M0 = Meow128_AESDEC(M0, Mixer);
     
     meow_hash Result;
     Result.u128 = M0;
@@ -537,41 +549,41 @@ MeowHashMergeArray(meow_u64 MacroBlockCount, meow_macroblock_result *MacroBlockH
 static meow_macroblock_result
 MeowHash1Op(int BlockCount, meow_u8 *Source)
 {
-    meow_u128 S0 = _mm_setzero_si128();
-    meow_u128 S1 = _mm_setzero_si128();
-    meow_u128 S2 = _mm_setzero_si128();
-    meow_u128 S3 = _mm_setzero_si128();
-    meow_u128 S4 = _mm_setzero_si128();
-    meow_u128 S5 = _mm_setzero_si128();
-    meow_u128 S6 = _mm_setzero_si128();
-    meow_u128 S7 = _mm_setzero_si128();
-    meow_u128 S8 = _mm_setzero_si128();
-    meow_u128 S9 = _mm_setzero_si128();
-    meow_u128 SA = _mm_setzero_si128();
-    meow_u128 SB = _mm_setzero_si128();
-    meow_u128 SC = _mm_setzero_si128();
-    meow_u128 SD = _mm_setzero_si128();
-    meow_u128 SE = _mm_setzero_si128();
-    meow_u128 SF = _mm_setzero_si128();
+    meow_u128 S0 = Meow128_Zero();
+    meow_u128 S1 = Meow128_Zero();
+    meow_u128 S2 = Meow128_Zero();
+    meow_u128 S3 = Meow128_Zero();
+    meow_u128 S4 = Meow128_Zero();
+    meow_u128 S5 = Meow128_Zero();
+    meow_u128 S6 = Meow128_Zero();
+    meow_u128 S7 = Meow128_Zero();
+    meow_u128 S8 = Meow128_Zero();
+    meow_u128 S9 = Meow128_Zero();
+    meow_u128 SA = Meow128_Zero();
+    meow_u128 SB = Meow128_Zero();
+    meow_u128 SC = Meow128_Zero();
+    meow_u128 SD = Meow128_Zero();
+    meow_u128 SE = Meow128_Zero();
+    meow_u128 SF = Meow128_Zero();
     
     while(BlockCount--)
     {
-        S0 = _mm_aesdec_si128(S0, *(meow_u128 *)(Source));
-        S1 = _mm_aesdec_si128(S1, *(meow_u128 *)(Source + 16));
-        S2 = _mm_aesdec_si128(S2, *(meow_u128 *)(Source + 32));
-        S3 = _mm_aesdec_si128(S3, *(meow_u128 *)(Source + 48));
-        S4 = _mm_aesdec_si128(S4, *(meow_u128 *)(Source + 64));
-        S5 = _mm_aesdec_si128(S5, *(meow_u128 *)(Source + 80));
-        S6 = _mm_aesdec_si128(S6, *(meow_u128 *)(Source + 96));
-        S7 = _mm_aesdec_si128(S7, *(meow_u128 *)(Source + 112));
-        S8 = _mm_aesdec_si128(S8, *(meow_u128 *)(Source + 128));
-        S9 = _mm_aesdec_si128(S9, *(meow_u128 *)(Source + 144));
-        SA = _mm_aesdec_si128(SA, *(meow_u128 *)(Source + 160));
-        SB = _mm_aesdec_si128(SB, *(meow_u128 *)(Source + 176));
-        SC = _mm_aesdec_si128(SC, *(meow_u128 *)(Source + 192));
-        SD = _mm_aesdec_si128(SD, *(meow_u128 *)(Source + 208));
-        SE = _mm_aesdec_si128(SE, *(meow_u128 *)(Source + 224));
-        SF = _mm_aesdec_si128(SF, *(meow_u128 *)(Source + 240));
+        S0 = Meow128_AESDEC_Mem(S0, Source);
+        S1 = Meow128_AESDEC_Mem(S1, Source + 16);
+        S2 = Meow128_AESDEC_Mem(S2, Source + 32);
+        S3 = Meow128_AESDEC_Mem(S3, Source + 48);
+        S4 = Meow128_AESDEC_Mem(S4, Source + 64);
+        S5 = Meow128_AESDEC_Mem(S5, Source + 80);
+        S6 = Meow128_AESDEC_Mem(S6, Source + 96);
+        S7 = Meow128_AESDEC_Mem(S7, Source + 112);
+        S8 = Meow128_AESDEC_Mem(S8, Source + 128);
+        S9 = Meow128_AESDEC_Mem(S9, Source + 144);
+        SA = Meow128_AESDEC_Mem(SA, Source + 160);
+        SB = Meow128_AESDEC_Mem(SB, Source + 176);
+        SC = Meow128_AESDEC_Mem(SC, Source + 192);
+        SD = Meow128_AESDEC_Mem(SD, Source + 208);
+        SE = Meow128_AESDEC_Mem(SE, Source + 224);
+        SF = Meow128_AESDEC_Mem(SF, Source + 240);
         
         Source += (1 << MEOW_HASH_BLOCK_SIZE_SHIFT);
     }
@@ -600,116 +612,197 @@ MeowHash1Op(int BlockCount, meow_u8 *Source)
 static meow_hash
 MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
 {
+    //
     // NOTE(casey): For less than 16 bytes, we punt, because we can't guarantee we won't issue a bad load.
     // For more than MEOW_HASH_MACROBLOCK_SIZE, we punt, because we want to support multithreading.
-    if((TotalLengthInBytes < 16) ||
-       (TotalLengthInBytes >= MEOW_HASH_MACROBLOCK_SIZE))
+    //
+    
+    if(TotalLengthInBytes >= MEOW_HASH_MACROBLOCK_SIZE)
     {
         return(MeowHashViaOp(MeowHash1Op, Seed, TotalLengthInBytes, SourceInit));
     }
     
+    //
     // NOTE(casey): Initialize all 16 streams to 0
-    meow_u128 S0 = _mm_setzero_si128();
-    meow_u128 S1 = _mm_setzero_si128();
-    meow_u128 S2 = _mm_setzero_si128();
-    meow_u128 S3 = _mm_setzero_si128();
-    meow_u128 S4 = _mm_setzero_si128();
-    meow_u128 S5 = _mm_setzero_si128();
-    meow_u128 S6 = _mm_setzero_si128();
-    meow_u128 S7 = _mm_setzero_si128();
-    meow_u128 S8 = _mm_setzero_si128();
-    meow_u128 S9 = _mm_setzero_si128();
-    meow_u128 SA = _mm_setzero_si128();
-    meow_u128 SB = _mm_setzero_si128();
-    meow_u128 SC = _mm_setzero_si128();
-    meow_u128 SD = _mm_setzero_si128();
-    meow_u128 SE = _mm_setzero_si128();
-    meow_u128 SF = _mm_setzero_si128();
+    //
     
+    meow_u128 S0 = Meow128_Zero();
+    meow_u128 S1 = Meow128_Zero();
+    meow_u128 S2 = Meow128_Zero();
+    meow_u128 S3 = Meow128_Zero();
+    meow_u128 S4 = Meow128_Zero();
+    meow_u128 S5 = Meow128_Zero();
+    meow_u128 S6 = Meow128_Zero();
+    meow_u128 S7 = Meow128_Zero();
+    meow_u128 S8 = Meow128_Zero();
+    meow_u128 S9 = Meow128_Zero();
+    meow_u128 SA = Meow128_Zero();
+    meow_u128 SB = Meow128_Zero();
+    meow_u128 SC = Meow128_Zero();
+    meow_u128 SD = Meow128_Zero();
+    meow_u128 SE = Meow128_Zero();
+    meow_u128 SF = Meow128_Zero();
+    
+    //
     // NOTE(casey): Handle as many full 256-byte blocks as possible
+    //
+    
     meow_u8 *Source = (meow_u8 *)SourceInit;
     int Len = (int)TotalLengthInBytes;
     int BlockCount = (Len >> MEOW_HASH_BLOCK_SIZE_SHIFT);
     Len -= (BlockCount << MEOW_HASH_BLOCK_SIZE_SHIFT);
     while(BlockCount--)
     {
-        S0 = _mm_aesdec_si128(S0, *(meow_u128 *)(Source));
-        S1 = _mm_aesdec_si128(S1, *(meow_u128 *)(Source + 16));
-        S2 = _mm_aesdec_si128(S2, *(meow_u128 *)(Source + 32));
-        S3 = _mm_aesdec_si128(S3, *(meow_u128 *)(Source + 48));
-        S4 = _mm_aesdec_si128(S4, *(meow_u128 *)(Source + 64));
-        S5 = _mm_aesdec_si128(S5, *(meow_u128 *)(Source + 80));
-        S6 = _mm_aesdec_si128(S6, *(meow_u128 *)(Source + 96));
-        S7 = _mm_aesdec_si128(S7, *(meow_u128 *)(Source + 112));
-        S8 = _mm_aesdec_si128(S8, *(meow_u128 *)(Source + 128));
-        S9 = _mm_aesdec_si128(S9, *(meow_u128 *)(Source + 144));
-        SA = _mm_aesdec_si128(SA, *(meow_u128 *)(Source + 160));
-        SB = _mm_aesdec_si128(SB, *(meow_u128 *)(Source + 176));
-        SC = _mm_aesdec_si128(SC, *(meow_u128 *)(Source + 192));
-        SD = _mm_aesdec_si128(SD, *(meow_u128 *)(Source + 208));
-        SE = _mm_aesdec_si128(SE, *(meow_u128 *)(Source + 224));
-        SF = _mm_aesdec_si128(SF, *(meow_u128 *)(Source + 240));
+        S0 = Meow128_AESDEC_Mem(S0, Source);
+        S1 = Meow128_AESDEC_Mem(S1, Source + 16);
+        S2 = Meow128_AESDEC_Mem(S2, Source + 32);
+        S3 = Meow128_AESDEC_Mem(S3, Source + 48);
+        S4 = Meow128_AESDEC_Mem(S4, Source + 64);
+        S5 = Meow128_AESDEC_Mem(S5, Source + 80);
+        S6 = Meow128_AESDEC_Mem(S6, Source + 96);
+        S7 = Meow128_AESDEC_Mem(S7, Source + 112);
+        S8 = Meow128_AESDEC_Mem(S8, Source + 128);
+        S9 = Meow128_AESDEC_Mem(S9, Source + 144);
+        SA = Meow128_AESDEC_Mem(SA, Source + 160);
+        SB = Meow128_AESDEC_Mem(SB, Source + 176);
+        SC = Meow128_AESDEC_Mem(SC, Source + 192);
+        SD = Meow128_AESDEC_Mem(SD, Source + 208);
+        SE = Meow128_AESDEC_Mem(SE, Source + 224);
+        SF = Meow128_AESDEC_Mem(SF, Source + 240);
         
         Source += (1 << MEOW_HASH_BLOCK_SIZE_SHIFT);
     }
     
+    //
     // NOTE(casey): Handle as many full 128-bit lanes as possible
+    //
+    
     switch(Len >> 4)
     {
-        case 15: SE = _mm_aesdec_si128(SE, *(meow_u128 *)(Source + 224));
-        case 14: SD = _mm_aesdec_si128(SD, *(meow_u128 *)(Source + 208));
-        case 13: SC = _mm_aesdec_si128(SC, *(meow_u128 *)(Source + 192));
-        case 12: SB = _mm_aesdec_si128(SB, *(meow_u128 *)(Source + 176));
-        case 11: SA = _mm_aesdec_si128(SA, *(meow_u128 *)(Source + 160));
-        case 10: S9 = _mm_aesdec_si128(S9, *(meow_u128 *)(Source + 144));
-        case  9: S8 = _mm_aesdec_si128(S8, *(meow_u128 *)(Source + 128));
-        case  8: S7 = _mm_aesdec_si128(S7, *(meow_u128 *)(Source + 112));
-        case  7: S6 = _mm_aesdec_si128(S6, *(meow_u128 *)(Source + 96));
-        case  6: S5 = _mm_aesdec_si128(S5, *(meow_u128 *)(Source + 80));
-        case  5: S4 = _mm_aesdec_si128(S4, *(meow_u128 *)(Source + 64));
-        case  4: S3 = _mm_aesdec_si128(S3, *(meow_u128 *)(Source + 48));
-        case  3: S2 = _mm_aesdec_si128(S2, *(meow_u128 *)(Source + 32));
-        case  2: S1 = _mm_aesdec_si128(S1, *(meow_u128 *)(Source + 16));
-        case  1: S0 = _mm_aesdec_si128(S0, *(meow_u128 *)(Source));
+        case 15: SE = Meow128_AESDEC_Mem(SE, Source + 224);
+        case 14: SD = Meow128_AESDEC_Mem(SD, Source + 208);
+        case 13: SC = Meow128_AESDEC_Mem(SC, Source + 192);
+        case 12: SB = Meow128_AESDEC_Mem(SB, Source + 176);
+        case 11: SA = Meow128_AESDEC_Mem(SA, Source + 160);
+        case 10: S9 = Meow128_AESDEC_Mem(S9, Source + 144);
+        case  9: S8 = Meow128_AESDEC_Mem(S8, Source + 128);
+        case  8: S7 = Meow128_AESDEC_Mem(S7, Source + 112);
+        case  7: S6 = Meow128_AESDEC_Mem(S6, Source + 96);
+        case  6: S5 = Meow128_AESDEC_Mem(S5, Source + 80);
+        case  5: S4 = Meow128_AESDEC_Mem(S4, Source + 64);
+        case  4: S3 = Meow128_AESDEC_Mem(S3, Source + 48);
+        case  3: S2 = Meow128_AESDEC_Mem(S2, Source + 32);
+        case  2: S1 = Meow128_AESDEC_Mem(S1, Source + 16);
+        case  1: S0 = Meow128_AESDEC_Mem(S0, Source);
         default:;
     }
     
+    //
+    // NOTE(casey): Do the first half of the mixdown
+    //
+    
+    meow_u128 M0 = S7;
+    M0 = Meow128_AESDEC(M0, SA);
+    M0 = Meow128_AESDEC(M0, S4);
+    M0 = Meow128_AESDEC(M0, S5);
+    M0 = Meow128_AESDEC(M0, SC);
+    M0 = Meow128_AESDEC(M0, S8);
+    M0 = Meow128_AESDEC(M0, S0);
+    M0 = Meow128_AESDEC(M0, S1);
+    M0 = Meow128_AESDEC(M0, S9);
+    
+    //
     // NOTE(casey): Deal with individual bytes
-    // Many thanks to Fabien Giesen here for pointing out the overlapping load trick
+    //
+    
     if(Len & 0xF)
     {
-        // NOTE(casey): This only works because we don't use this routine on buffers
-        // less than 16 bytes long (see top of function)
-        SF = _mm_aesdec_si128(SF, _mm_loadu_si128((meow_u128 *)(Source + Len - 16)));
+        Source += (Len & 0xF0);
+        
+        // TODO(casey): Probably do a different code path for ARM here!
+        // Do they have proper masked gather?
+        
+        // NOTE(casey): If the buffer is smaller than 16 bytes, we have to actually
+        // build a 128-bit value piece by piece to avoid out-of-bounds reads.
+        // Eventually this could be replaced with a masked gather, once they are
+        // a commonly supported operation (wishful thinking :/ )
+        meow_u128 Partial = Meow128_Zero();
+        switch(Len & 0xF)
+        {
+            case 15:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 14), 14);
+            case 14:
+            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 12), 6);
+            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)(Source + 8), 2);
+            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
+            break;
+            
+            case 13:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 12), 12);
+            case 12:
+            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)(Source + 8), 2);
+            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
+            break;
+            
+            case 11:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 10), 10);
+            case 10:
+            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 4), 4);
+            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
+            break;
+            
+            case  9:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 8), 8);
+            case  8:
+            Partial = _mm_insert_epi64(Partial, *(meow_u64 *)Source, 0);
+            break;
+            
+            case  7:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 7), 7);
+            case  6:
+            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)(Source + 2), 2);
+            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)Source, 0);
+            break;
+            
+            case  5:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 4), 4);
+            case  4:
+            Partial = _mm_insert_epi32(Partial, *(meow_u32 *)Source, 0);
+            break;
+            
+            case  3:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)(Source + 2), 2);
+            case  2:
+            Partial = _mm_insert_epi16(Partial, *(meow_u16 *)Source, 0);
+            break;
+            
+            case  1:
+            Partial = _mm_insert_epi8(Partial, *(meow_u8 *)Source, 0);
+        }
+    
+        SF = Meow128_AESDEC(SF, Partial);
     }
     
-    // NOTE(casey): Combine the 16 streams into a single hash to spread the bits out evenly
-    meow_u128 M0 = S7;
-    M0 = _mm_aesdec_si128(M0, SA);
-    M0 = _mm_aesdec_si128(M0, S4);
-    M0 = _mm_aesdec_si128(M0, S5);
-    M0 = _mm_aesdec_si128(M0, SC);
-    M0 = _mm_aesdec_si128(M0, S8);
-    M0 = _mm_aesdec_si128(M0, S0);
-    M0 = _mm_aesdec_si128(M0, S1);
-    M0 = _mm_aesdec_si128(M0, S9);
-    M0 = _mm_aesdec_si128(M0, SD);
-    M0 = _mm_aesdec_si128(M0, S2);
-    M0 = _mm_aesdec_si128(M0, S6);
-    M0 = _mm_aesdec_si128(M0, SE);
-    M0 = _mm_aesdec_si128(M0, S3);
-    M0 = _mm_aesdec_si128(M0, SB);
-    M0 = _mm_aesdec_si128(M0, SF);
+    //
+    // NOTE(casey): Do the second half of the mixdown
+    //
     
-    // NOTE(casey): The mixing vector follows falkhash's lead and uses the seed twice, but the second time
-    // the length plus one is added to differentiate.  This seemed sensible, but I haven't thought too hard about this,
-    // there may be better things to use as a mixer.
-    meow_u128 Mixer = _mm_set_epi64x(Seed + TotalLengthInBytes + 1, Seed - TotalLengthInBytes);
+    M0 = Meow128_AESDEC(M0, SD);
+    M0 = Meow128_AESDEC(M0, S2);
+    M0 = Meow128_AESDEC(M0, S6);
+    M0 = Meow128_AESDEC(M0, SE);
+    M0 = Meow128_AESDEC(M0, S3);
+    M0 = Meow128_AESDEC(M0, SB);
+    M0 = Meow128_AESDEC(M0, SF);
+    
+    // TODO(casey): There needs to be a solid idea behind the mixing vector here.
+    // Before Meow v1, we need some definitive analysis of what it should be.
+    meow_u128 Mixer = Meow128_Set64x2(Seed - TotalLengthInBytes, Seed + TotalLengthInBytes + 1);
     
     // NOTE(casey): Repeat AES thrice to ensure diffusion to all 128 bits (using the Mixer, so the seed and length come in)
-    M0 = _mm_aesdec_si128(M0, Mixer);
-    M0 = _mm_aesdec_si128(M0, Mixer);
-    M0 = _mm_aesdec_si128(M0, Mixer);
+    M0 = Meow128_AESDEC(M0, Mixer);
+    M0 = Meow128_AESDEC(M0, Mixer);
+    M0 = Meow128_AESDEC(M0, Mixer);
     
     meow_hash Result;
     Result.u128 = M0;
@@ -726,41 +819,41 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
 static meow_macroblock_result
 MeowHash2Op(int BlockCount, meow_u8 *Source)
 {
-    meow_u256 S01 = _mm256_setzero_si256();
-    meow_u256 S23 = _mm256_setzero_si256();
-    meow_u256 S45 = _mm256_setzero_si256();
-    meow_u256 S67 = _mm256_setzero_si256();
-    meow_u256 S89 = _mm256_setzero_si256();
-    meow_u256 SAB = _mm256_setzero_si256();
-    meow_u256 SCD = _mm256_setzero_si256();
-    meow_u256 SEF = _mm256_setzero_si256();
+    meow_u256 S01 = Meow256_Zero();
+    meow_u256 S23 = Meow256_Zero();
+    meow_u256 S45 = Meow256_Zero();
+    meow_u256 S67 = Meow256_Zero();
+    meow_u256 S89 = Meow256_Zero();
+    meow_u256 SAB = Meow256_Zero();
+    meow_u256 SCD = Meow256_Zero();
+    meow_u256 SEF = Meow256_Zero();
     
     while(BlockCount--)
     {
-        S01 = _mm256_aesdec_epi128(S01, *(meow_u256 *)(Source));
-        S23 = _mm256_aesdec_epi128(S23, *(meow_u256 *)(Source + 32));
+        S01 = Meow256_AESDEC_Mem(S01, Source);
+        S23 = Meow256_AESDEC_Mem(S23, Source + 32);
         
-        S45 = _mm256_aesdec_epi128(S45, *(meow_u256 *)(Source + 64));
-        S67 = _mm256_aesdec_epi128(S67, *(meow_u256 *)(Source + 96));
+        S45 = Meow256_AESDEC_Mem(S45, Source + 64);
+        S67 = Meow256_AESDEC_Mem(S67, Source + 96);
         
-        S89 = _mm256_aesdec_epi128(S89, *(meow_u256 *)(Source + 128));
-        SAB = _mm256_aesdec_epi128(SAB, *(meow_u256 *)(Source + 160));
+        S89 = Meow256_AESDEC_Mem(S89, Source + 128);
+        SAB = Meow256_AESDEC_Mem(SAB, Source + 160);
         
-        SCD = _mm256_aesdec_epi128(SCD, *(meow_u256 *)(Source + 192));
-        SEF = _mm256_aesdec_epi128(SEF, *(meow_u256 *)(Source + 224));
+        SCD = Meow256_AESDEC_Mem(SCD, Source + 192);
+        SEF = Meow256_AESDEC_Mem(SEF, Source + 224);
         
         Source += (1 << MEOW_HASH_BLOCK_SIZE_SHIFT);
     }
     
     meow_macroblock_result Result;
-    _mm256_store_si256((meow_u256 *)&Result.S0, S01);
-    _mm256_store_si256((meow_u256 *)&Result.S2, S23);
-    _mm256_store_si256((meow_u256 *)&Result.S4, S45);
-    _mm256_store_si256((meow_u256 *)&Result.S6, S67);
-    _mm256_store_si256((meow_u256 *)&Result.S8, S89);
-    _mm256_store_si256((meow_u256 *)&Result.SA, SAB);
-    _mm256_store_si256((meow_u256 *)&Result.SC, SCD);
-    _mm256_store_si256((meow_u256 *)&Result.SE, SEF);
+    _mm256_store_si256(&Result.S0, S01);
+    _mm256_store_si256(&Result.S2, S23);
+    _mm256_store_si256(&Result.S4, S45);
+    _mm256_store_si256(&Result.S6, S67);
+    _mm256_store_si256(&Result.S8, S89);
+    _mm256_store_si256(&Result.SA, SAB);
+    _mm256_store_si256(&Result.SC, SCD);
+    _mm256_store_si256(&Result.SE, SEF);
     
     return(Result);
 }
@@ -780,26 +873,26 @@ MeowHash2(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *Source)
 static meow_macroblock_result
 MeowHash4Op(int BlockCount, meow_u8 *Source)
 {
-    meow_u512 S0123 = _mm512_setzero_si512();
-    meow_u512 S4567 = _mm512_setzero_si512();
-    meow_u512 S89AB = _mm512_setzero_si512();
-    meow_u512 SCDEF = _mm512_setzero_si512();
+    meow_u512 S0123 = Meow512_Zero();
+    meow_u512 S4567 = Meow512_Zero();
+    meow_u512 S89AB = Meow512_Zero();
+    meow_u512 SCDEF = Meow512_Zero();
     
     while(BlockCount--)
     {
-        S0123 = _mm512_aesdec_epi128(S0123, *(meow_u512 *)(From));
-        S4567 = _mm512_aesdec_epi128(S4567, *(meow_u512 *)(From + 64));
-        S89AB = _mm512_aesdec_epi128(S89AB, *(meow_u512 *)(From + 128));
-        SCDEF = _mm512_aesdec_epi128(SCDEF, *(meow_u512 *)(From + 192));
+        S0123 = Meow512_AESDEC_Mem(S0123, From);
+        S4567 = Meow512_AESDEC_Mem(S4567, From + 64);
+        S89AB = Meow512_AESDEC_Mem(S89AB, From + 128);
+        SCDEF = Meow512_AESDEC_Mem(SCDEF, From + 192);
         
         Source += (1 << MEOW_HASH_BLOCK_SIZE_SHIFT);
     }
     
     meow_macroblock_result Result;
-    _mm512_store_si512((meow_u512 *)&Result.S0, S0123);
-    _mm512_store_si512((meow_u512 *)&Result.S4, S4567);
-    _mm512_store_si512((meow_u512 *)&Result.S8, S89AB);
-    _mm512_store_si512((meow_u512 *)&Result.SC, SCDEF);
+    _mm512_store_si512(&Result.S0, S0123);
+    _mm512_store_si512(&Result.S4, S4567);
+    _mm512_store_si512(&Result.S8, S89AB);
+    _mm512_store_si512(&Result.SC, SCDEF);
     
     return(Result);
 }
