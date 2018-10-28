@@ -39,19 +39,19 @@ static void* aligned_alloc(size_t alignment, size_t size)
 
 #define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
 
-static meow_hash
+static meow_u128
 MeowHashTruncate64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = MeowHash1(Seed, Len, Source);
-    Result.u64[1] = 0;
+    meow_u128 Result = MeowHash1(Seed, Len, Source);
+    ((meow_u64 *)&Result)[1] = 0;
     return(Result);
 }
 
-static meow_hash
+static meow_u128
 MeowHashTruncate32(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = MeowHashTruncate64(Seed, Len, Source);
-    Result.u32[1] = 0;
+    meow_u128 Result = MeowHashTruncate64(Seed, Len, Source);
+    ((meow_u32 *)&Result)[1] = 0;
     return(Result);
 }
 
@@ -74,10 +74,10 @@ MeowHashTruncate32(meow_u64 Seed, meow_u64 Len, void *Source)
 
 #include "other/city.h"
 #include "other/city.cc"
-static meow_hash
+static meow_u128
 CityHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
     uint128 Temp = CityHash128((char *)Source, Len);
     Result.u64[0] = Temp.first;
@@ -87,10 +87,10 @@ CityHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 }
 
 #include "other/falkhash.c"
-static meow_hash
+static meow_u128
 FalkHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
     Result.u128 = falkhash(Source, Len, Seed);
     
@@ -99,10 +99,10 @@ FalkHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 
 #include "other/metrohash128.h"
 #include "other/metrohash128.cpp"
-static meow_hash
+static meow_u128
 MetroHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
     MetroHash128::Hash((uint8_t *)Source, Len, (uint8_t *)&Result, Seed);
     
@@ -111,10 +111,10 @@ MetroHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 
 #if MEOW_T1HA_INCLUDED
 #include "other/t1ha0_ia32aes_avx.c"
-static meow_hash
+static meow_u128
 t1ha64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
     Result.u64[0] = t1ha0_ia32aes_avx(Source, Len, Seed);
     
@@ -123,10 +123,10 @@ t1ha64(meow_u64 Seed, meow_u64 Len, void *Source)
 #endif
 
 #include "other/xxhash.c"
-static meow_hash
+static meow_u128
 xxHash64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
     Result.u64[0] = XXH64(Source, Len, Seed);
     
@@ -196,7 +196,8 @@ PrintSize(FILE *Stream, double Size, int Fixed)
 }
 
 static void
-PrintHash(FILE *Stream, meow_hash Hash)
+PrintHash(FILE *Stream, meow_u128 Hash)
 {
-    fprintf(Stream, "%08X-%08X-%08X-%08X", Hash.u32[3], Hash.u32[2], Hash.u32[1], Hash.u32[0]);
+    meow_u32 *HashU32 = (meow_u32 *)&Hash;
+    fprintf(Stream, "%08X-%08X-%08X-%08X", HashU32[3], HashU32[2], HashU32[1], HashU32[0]);
 }

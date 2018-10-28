@@ -118,7 +118,7 @@ main(int ArgCount, char **Args)
     //
     
     meow_u64 MaxClocksWithoutDrop = 4000000000ULL;
-    best_result Bests[40] = {};
+    best_result Bests[38] = {};
     double BytesPerCycle[ArrayCount(NamedHashTypes)][ArrayCount(Bests)] = {};
     
     {
@@ -321,7 +321,7 @@ main(int ArgCount, char **Args)
         {
             void *Buffer = aligned_alloc(MEOW_HASH_ALIGNMENT, Size);
             FuddleBuffer(Size, Buffer);
-            meow_hash ReferenceHash = MeowHash1(0, Size, Buffer);
+            meow_u128 ReferenceHash = MeowHash1(0, Size, Buffer);
             Work = MeowSourceBlocksFor(Size, Buffer);
             
             for(int TypeIndex = 0;
@@ -360,7 +360,7 @@ main(int ArgCount, char **Args)
                         // "consider_this_pointers_memory_changed_as_of_right_now()" intrinsic.
                         
                         meow_macroblock_result Group = MeowHashMergeArray(Work.MacroblockCount, WorkResults);
-                        meow_hash Hash = MeowHashFinish(&Group, 0, Work.TotalLengthInBytes, Work.Overhang, Work.OverhangStart);
+                        meow_u128 Hash = MeowHashFinish(&Group, 0, Work.TotalLengthInBytes, Work.Overhang, Work.OverhangStart);
                         
                         _ReadWriteBarrier();
                         

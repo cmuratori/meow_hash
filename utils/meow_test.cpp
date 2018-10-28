@@ -84,7 +84,7 @@ main(int ArgCount, char **Args)
                         meow_u8 FlipBit = (1 << (Flip % 8));
                         *FlipByte |= FlipBit;
                         
-                        meow_hash Canonical = MeowHash1(Seed, BufferSize, Buffer);
+                        meow_u128 Canonical = MeowHash1(Seed, BufferSize, Buffer);
                         if(Guard)
                         {
                             memset(Allocation, 0xFF, MEOW_HASH_ALIGNMENT);
@@ -94,8 +94,8 @@ main(int ArgCount, char **Args)
                         ++TotalPossible;
                         TRY
                         {
-                            meow_hash ImpHash = Type->Imp(Seed, BufferSize, Buffer);
-                            meow_hash OpHash = MeowHashViaOp(Type->Op, Seed, BufferSize, Buffer);
+                            meow_u128 ImpHash = Type->Imp(Seed, BufferSize, Buffer);
+                            meow_u128 OpHash = MeowHashViaOp(Type->Op, Seed, BufferSize, Buffer);
                             
                             if(!MeowHashesAreEqual(Canonical, ImpHash))
                             {

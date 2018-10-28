@@ -31,7 +31,7 @@ struct test_file
 
 struct test_value
 {
-    meow_hash Hash;
+    meow_u128 Hash;
     test_value *Next;
     test_file *FirstFile;
 };
@@ -228,9 +228,9 @@ IngestFile(test_group *Group, char *FileName)
         {
             test *Test = Group->Tests + TestIndex;
             
-            meow_hash Hash = Test->Type.Imp(0, File.Size, File.Contents);
+            meow_u128 Hash = Test->Type.Imp(0, File.Size, File.Contents);
             
-            test_value **Slot = &Test->Table[Hash.u32[0] % ArrayCount(Test->Table)];
+            test_value **Slot = &Test->Table[MeowU32From(Hash) % ArrayCount(Test->Table)];
             test_value *Entry = *Slot;
             while(Entry && memcmp(&Entry->Hash, &Hash, sizeof(Hash)))
             {
