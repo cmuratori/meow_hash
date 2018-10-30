@@ -66,33 +66,13 @@ MeowHashTruncate32(meow_u64 Seed, meow_u64 Len, void *Source)
 
 #if MEOW_INCLUDE_OTHER_HASHES
 
-#if !defined(_MSC_VER) || (_MSC_FULL_VER >= 191025017)
-#define MEOW_T1HA_INCLUDED 1
-#else
-#define MEOW_T1HA_INCLUDED 0
-#endif
-
-#include "other/city.h"
-#include "other/city.cc"
-static meow_u128
-CityHash128(meow_u64 Seed, meow_u64 Len, void *Source)
-{
-    meow_u128 Result = {};
-    
-    uint128 Temp = CityHash128((char *)Source, Len);
-    Result.u64[0] = Temp.first;
-    Result.u64[1] = Temp.second;
-    
-    return(Result);
-}
-
 #include "other/falkhash.c"
 static meow_u128
 FalkHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 {
     meow_u128 Result = {};
     
-    Result.u128 = falkhash(Source, Len, Seed);
+    Result = falkhash(Source, Len, Seed);
     
     return(Result);
 }
@@ -109,18 +89,16 @@ MetroHash128(meow_u64 Seed, meow_u64 Len, void *Source)
     return(Result);
 }
 
-#if MEOW_T1HA_INCLUDED
 #include "other/t1ha0_ia32aes_avx.c"
 static meow_u128
 t1ha64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
     meow_u128 Result = {};
     
-    Result.u64[0] = t1ha0_ia32aes_avx(Source, Len, Seed);
+    *(meow_u64 *)&Result = t1ha0_ia32aes_avx(Source, Len, Seed);
     
     return(Result);
 }
-#endif
 
 #include "other/xxhash.c"
 static meow_u128
@@ -128,8 +106,53 @@ xxHash64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
     meow_u128 Result = {};
     
-    Result.u64[0] = XXH64(Source, Len, Seed);
+    *(meow_u64 *)&Result = XXH64(Source, Len, Seed);
     
+    return(Result);
+}
+
+#include "other/clhash.c"
+static meow_u128 CLHashJunk[256];
+static meow_u128
+CLHash64(meow_u64 Seed, meow_u64 Len, void *Source)
+{
+    meow_u128 Result = {};
+    
+    *(meow_u64 *)&Result = clhash(CLHashJunk, (char *)Source, Len);
+    
+    return(Result);
+}
+
+#include "other/city.h"
+#include "other/city.cc"
+static meow_u128
+CityHash128(meow_u64 Seed, meow_u64 Len, void *Source)
+{
+    meow_u128 Result = {};
+    
+    *(uint128 *)&Result = CityHash128((char *)Source, Len);
+    
+    return(Result);
+}
+
+#define FARMHASH_NO_BUILTIN_EXPECT // NOTE(casey): It appears Farm Hash doesn't support __assume, only __builtin_expect, I guess?
+#include "other/farmhash.cc"
+static meow_u128
+FarmHash128(meow_u64 Seed, meow_u64 Len, void *Source)
+{
+    meow_u128 Result;
+    
+    /* NOTE(casey): I know it LOOKS like this is calling CityHash, but it's not - Farm's 128-bit hash is defined like this:
+    
+       return DebugTweak(farmhashcc::CityHash128WithSeed(s, len, seed));
+       
+       And then inside their CityHash128WithSeed, they call Murmur on small values, etc.  So this just goes more directly
+       to the source (hopefully - oh my god Farm Hash's code is giant)
+    */
+    
+    util::uint128_t R = util::farmhashcc::CityHash128WithSeed((const char *)Source, (size_t)Len, util::Uint128(Seed, Seed));
+    
+    Result = Meow128_Set64x2(R.first, R.second);
     return(Result);
 }
 
@@ -160,15 +183,15 @@ static named_hash_type NamedHashTypes[] =
     {(char *)"Meow64", (char *)"Meow 64-bit AES-NI 128-wide", MeowHashTruncate64},
     {(char *)"Meow32", (char *)"Meow 32-bit AES-NI 128-wide", MeowHashTruncate32},
 #endif
-    
+
 #if MEOW_INCLUDE_OTHER_HASHES
-#if MEOW_T1HA_INCLUDED
     {(char *)"t1ha64", (char *)"t1ha 64-bit", t1ha64},
-#endif
     {(char *)"Falk128", (char *)"Falk Hash 128-bit", FalkHash128},
     {(char *)"xx64", (char *)"xxHash 64-bit", xxHash64},
     {(char *)"Met128", (char *)"Metro Hash 128-bit", MetroHash128},
     {(char *)"City128", (char *)"City Hash 128-bit", CityHash128},
+    {(char *)"Farm", (char *)"Farm Hash 128-bit", FarmHash128},
+    {(char *)"CL", (char *)"CLHash 64-bit", CLHash64},
 #endif
 };
 
@@ -201,3 +224,4 @@ PrintHash(FILE *Stream, meow_u128 Hash)
     meow_u32 *HashU32 = (meow_u32 *)&Hash;
     fprintf(Stream, "%08X-%08X-%08X-%08X", HashU32[3], HashU32[2], HashU32[1], HashU32[0]);
 }
+    
