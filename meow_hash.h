@@ -447,35 +447,41 @@ MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengt
         SF = Meow128_AESDEC(SF, Partial);
     }
     
-    // NOTE(casey): Combine the 16 streams into a single hash to spread the bits out evenly
-    meow_u128 M0 = S7;
-    M0 = Meow128_AESDEC(M0, SA);
-    M0 = Meow128_AESDEC(M0, S4);
-    M0 = Meow128_AESDEC(M0, S5);
-    M0 = Meow128_AESDEC(M0, SC);
-    M0 = Meow128_AESDEC(M0, S8);
-    M0 = Meow128_AESDEC(M0, S0);
-    M0 = Meow128_AESDEC(M0, S1);
-    M0 = Meow128_AESDEC(M0, S9);
-    M0 = Meow128_AESDEC(M0, SD);
-    M0 = Meow128_AESDEC(M0, S2);
-    M0 = Meow128_AESDEC(M0, S6);
-    M0 = Meow128_AESDEC(M0, SE);
-    M0 = Meow128_AESDEC(M0, S3);
-    M0 = Meow128_AESDEC(M0, SB);
-    M0 = Meow128_AESDEC(M0, SF);
-    
-    // NOTE(casey): The mixing vector follows falkhash's lead and uses the seed twice, but the second time
-    // the length plus one is added to differentiate.  This seemed sensible, but I haven't thought too hard about this,
-    // there may be better things to use as a mixer.
+    // TODO(casey): There needs to be a solid idea behind the mixing vector here.
+    // Before Meow v1, we need some definitive analysis of what it should be.
     meow_u128 Mixer = Meow128_Set64x2(Seed - TotalLengthInBytes, Seed + TotalLengthInBytes + 1);
     
-    // NOTE(casey): Repeat AES thrice to ensure diffusion to all 128 bits (using the Mixer, so the seed and length come in)
-    M0 = Meow128_AESDEC(M0, Mixer);
-    M0 = Meow128_AESDEC(M0, Mixer);
-    M0 = Meow128_AESDEC(M0, Mixer);
+    S0 = Meow128_AESDEC(S0, S8);
+    S1 = Meow128_AESDEC(S1, S9);
+    S2 = Meow128_AESDEC(S2, SA);
+    S3 = Meow128_AESDEC(S3, SB);
+    S4 = Meow128_AESDEC(S4, SC);
+    S5 = Meow128_AESDEC(S5, SD);
+    S6 = Meow128_AESDEC(S6, SE);
+    S7 = Meow128_AESDEC(S7, SF);
     
-    return(M0);
+    S0 = Meow128_AESDEC(S0, Mixer);
+    S1 = Meow128_AESDEC(S1, Mixer);
+    S2 = Meow128_AESDEC(S2, Mixer);
+    S3 = Meow128_AESDEC(S3, Mixer);
+    S4 = Meow128_AESDEC(S4, Mixer);
+    S5 = Meow128_AESDEC(S5, Mixer);
+    S6 = Meow128_AESDEC(S6, Mixer);
+    S7 = Meow128_AESDEC(S7, Mixer);
+    
+    S0 = Meow128_AESDEC(S0, S4);
+    S1 = Meow128_AESDEC(S1, S5);
+    S2 = Meow128_AESDEC(S2, S6);
+    S3 = Meow128_AESDEC(S3, S7);
+    
+    S0 = Meow128_AESDEC(S0, S2);
+    S1 = Meow128_AESDEC(S1, S3);
+    
+    S0 = Meow128_AESDEC(S0, S1);
+    
+    S0 = Meow128_AESDEC(S0, Mixer);
+    
+    return(S0);
 }
 
 static meow_u128
