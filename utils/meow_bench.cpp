@@ -11,6 +11,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __aarch64__
+// NOTE(mmozeiko): On ARM you normally cannot access cycle counter from user-space.
+// Download & build following kernel module that enables access to PMU cycle counter
+// from user-space code: https://github.com/zhiyisun/enable_arm_pmu
+#include <stdint.h>
+#include "enable_arm_pmu/armpmu_lib.h"
+#define __rdtsc() read_pmu()
+#endif
+
 #include "meow_test.h"
 
 //
@@ -87,6 +96,10 @@ FuddleBuffer(meow_u64 Size, void *Buffer)
 int
 main(int ArgCount, char **Args)
 {
+#if __aarch64__
+    enable_pmu(0x008);
+#endif
+
     //
     // NOTE(casey): Print the banner and status
     //
@@ -398,5 +411,9 @@ main(int ArgCount, char **Args)
     ExitProcess(0);
 #endif
     
+#if __aarch64__
+    disable_pmu(0x008);
+#endif
+
     return(0);
 }

@@ -146,11 +146,11 @@
        // if you are not compiling for platforms with AVX support!
        
        // Always available
-       meow_hash MeowHash1(u64 Seed, u64 Len, void *Source);
+       meow_u128 MeowHash1(u64 Seed, u64 Len, void *Source);
        
        // Available only when compiling with AVX extensions
-       meow_hash MeowHash2(u64 Seed, u64 Len, void *Source);
-       meow_hash MeowHash4(u64 Seed, u64 Len, void *Source);
+       meow_u128 MeowHash2(u64 Seed, u64 Len, void *Source);
+       meow_u128 MeowHash4(u64 Seed, u64 Len, void *Source);
        
    MeowHash1 is 128-bit wide AES-NI.  MeowHash2 is 256-bit wide VAES.
    MeowHash4 is 512-bit wide VAES.  As of the initial publication of
@@ -208,30 +208,49 @@
 // it can't be helped.
 //
 
+#if __x86_64__ || __i386__ || _M_AMD64 || _M_IX86
+#define MEOW_HASH_INTEL 1
+#define MEOW_HASH_ALIGNMENT 128
+#elif __aarch64__ || _M_ARM64
+#define MEOW_HASH_ARMV8 1
+#define MEOW_HASH_ALIGNMENT 1
+#else
+#error Cannot determine architecture to use!
+#endif
+
 #if !defined(MEOW_HASH_AVX512)
 #define MEOW_HASH_AVX512 0
 #endif
 
 #if !defined(MEOW_HASH_TYPES)
+
 #define meow_u8 char unsigned
 #define meow_u16 short unsigned
 #define meow_u32 int unsigned
 #define meow_u64 long long unsigned
+
+#define MEOW_HASH_TYPES
+
+#if MEOW_HASH_INTEL
+
 #define meow_u128 __m128i
+#define meow_state __m128i
+
 #if MEOW_HASH_AVX512
 #define meow_u256 __m256i
 #define meow_u512 __m512i
 #endif
-#define MEOW_HASH_TYPES
 
 #define Meow128_AreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A), (B))) == 0xFFFF)
 #define Meow128_AESDEC(Prior, XOr) _mm_aesdec_si128((Prior), (XOr))
 #define Meow128_AESDEC_Mem(Prior, XOrPtr) _mm_aesdec_si128((Prior), *(meow_u128 *)(XOrPtr))
+#define Meow128_AESDEC_Finalize(A) (A)
 #define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
 #define Meow128_LoadUnaligned(Ptr) _mm_loadu_si128((meow_u128 *)(Ptr))
 
 // TODO(casey): Not sure if this should actually be Meow128_Zero(A) ((A) = _mm_setzero_si128()), maybe
 #define Meow128_Zero() _mm_setzero_si128()
+#define Meow128_ZeroState() Meow128_Zero()
 
 #define Meow256_AESDEC(Prior, XOr) _mm256_aesdec_epi128((Prior), (XOr))
 #define Meow256_AESDEC_Mem(Prior, XOrPtr) _mm256_aesdec_epi128((Prior), *(meow_u256 *)(XOrPtr))
@@ -243,11 +262,96 @@
 #define Meow512_Store(Value, Ptr) _mm256_store_si256((meow_u512 *)(Ptr), (Value));
 #define Meow512_Zero() _mm512_setzero_si512()
 
+#elif MEOW_HASH_ARMV8
+
+#define meow_u128 uint8x16_t
+
+// NOTE(mmozeiko): AES opcodes on ARMv8 work a bit differently than on Intel
+// On Intel the "x = AESDEC(x, m)" does following:
+//   x = InvMixColumns(SubBytes(ShiftRows(x))) ^ m
+// But on ARMv8 the "x = AESDEC(x, m)" does following:
+//   x = SubBytes(ShiftRows(x ^ m))
+// Thus on ARMv8 it requires extra InvMixColumns call and delay on Xor operation.
+// On iteration N it needs to use m[N-1] as input, and remeber m[N] for next iteration.
+// This structure will store memory operand in member B which will be used in
+// next AESDEC opcode. Remember to do one more XOR(A,B) when finishing AES
+// operations in a loop.
+typedef struct {
+    meow_u128 A;
+    meow_u128 B;
+} meow_state;
+
+static int
+Meow128_AreEqual(meow_u128 A, meow_u128 B)
+{
+    uint8x16_t Powers = {
+        1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128,
+    };
+
+    uint8x16_t Input = vceqq_u8(A, B);
+    uint64x2_t Mask = vpaddlq_u32(vpaddlq_u16(vpaddlq_u8(vandq_u8(Input, Powers))));
+
+    meow_u16 Output;
+    vst1q_lane_u8((meow_u8*)&Output + 0, vreinterpretq_u8_u64(Mask), 0);
+    vst1q_lane_u8((meow_u8*)&Output + 1, vreinterpretq_u8_u64(Mask), 8);
+    return Output == 0xFFFF;
+}
+
+static meow_state
+Meow128_AESDEC(meow_state Prior, meow_u128 XOr)
+{
+    meow_state R;
+    R.A = vaesimcq_u8(vaesdq_u8(Prior.A, Prior.B));
+    R.B = XOr;
+    return(R);
+}
+
+static meow_state
+Meow128_AESDEC_Mem(meow_state Prior, void* XOrPtr)
+{
+    meow_state R;
+    R.A = vaesimcq_u8(vaesdq_u8(Prior.A, Prior.B));
+    R.B = vld1q_u8((meow_u8*)XOrPtr);
+    return(R);
+}
+
+static meow_u128
+Meow128_AESDEC_Finalize(meow_state Value)
+{
+    meow_u128 R = veorq_u8(Value.A, Value.B);
+    return(R);
+}
+
+// NOTE(mmozeiko): do not use "B" member for return value!
+// Use this only as input to AESDEC operation
+static meow_u128
+Meow128_Set64x2(meow_u64 Low64, meow_u64 High64)
+{
+   meow_u128 R = vreinterpretq_u8_u64(vcombine_u64(vcreate_u64(Low64), vcreate_u64(High64)));
+   return(R);
+}
+
+static meow_u128
+Meow128_Zero()
+{
+    meow_u128 R = vdupq_n_u8(0);
+    return(R);
+}
+
+static meow_state
+Meow128_ZeroState()
+{
+    meow_state R;
+    R.A = R.B = vdupq_n_u8(0);
+    return(R);
+}
+
+#endif
+
 #endif
 
 #define MEOW_HASH_VERSION 3
 #define MEOW_HASH_VERSION_NAME "0.3/snowshoe"
-#define MEOW_HASH_ALIGNMENT 128
 #define MEOW_HASH_MACROBLOCK_COUNT 4096
 #define MEOW_HASH_MACROBLOCK_SIZE (MEOW_HASH_MACROBLOCK_COUNT << MEOW_HASH_BLOCK_SIZE_SHIFT)
 #define MEOW_HASH_BLOCK_SIZE_SHIFT 8
@@ -281,22 +385,22 @@ typedef struct meow_macroblock
 
 typedef struct meow_macroblock_result
 {
-    meow_u128 S0;
-    meow_u128 S1;
-    meow_u128 S2;
-    meow_u128 S3;
-    meow_u128 S4;
-    meow_u128 S5;
-    meow_u128 S6;
-    meow_u128 S7;
-    meow_u128 S8;
-    meow_u128 S9;
-    meow_u128 SA;
-    meow_u128 SB;
-    meow_u128 SC;
-    meow_u128 SD;
-    meow_u128 SE;
-    meow_u128 SF;
+    meow_state S0;
+    meow_state S1;
+    meow_state S2;
+    meow_state S3;
+    meow_state S4;
+    meow_state S5;
+    meow_state S6;
+    meow_state S7;
+    meow_state S8;
+    meow_state S9;
+    meow_state SA;
+    meow_state SB;
+    meow_state SC;
+    meow_state SD;
+    meow_state SE;
+    meow_state SF;
 } meow_macroblock_result;
 
 typedef meow_macroblock_result meow_macroblock_op(int BlockCount, meow_u8 *Source);
@@ -309,6 +413,7 @@ static meow_u64
 MeowU64From(meow_u128 Hash)
 {
     // TODO(casey): It is probably worth it to use the cvt intrinsics here
+    // TODO(mmozeiko): use vgetq_lane_u64 on ARMv8
     meow_u64 Result = *(meow_u64 *)&Hash;
     return(Result);
 }
@@ -317,12 +422,13 @@ static meow_u32
 MeowU32From(meow_u128 Hash)
 {
     // TODO(casey): It is probably worth it to use the cvt intrinsics here
+    // TODO(mmozeiko): use vgetq_lane_u32 on ARMv8
     meow_u32 Result = *(meow_u32 *)&Hash;
     return(Result);
 }
 
 //
-// NOTE(casey): "Fast" comparison (using SSE)
+// NOTE(casey): "Fast" comparison (using SSE or NEON)
 //
 static int
 MeowHashesAreEqual(meow_u128 A, meow_u128 B)
@@ -372,43 +478,43 @@ MeowGetMacroblock(meow_source_blocks volatile *Blocks, meow_u64 Index)
 static void
 MeowHashMerge(meow_macroblock_result *A, meow_macroblock_result *B)
 {
-    A->S0 = Meow128_AESDEC(A->S0, B->S0);
-    A->S1 = Meow128_AESDEC(A->S1, B->S1);
-    A->S2 = Meow128_AESDEC(A->S2, B->S2);
-    A->S3 = Meow128_AESDEC(A->S3, B->S3);
-    A->S4 = Meow128_AESDEC(A->S4, B->S4);
-    A->S5 = Meow128_AESDEC(A->S5, B->S5);
-    A->S6 = Meow128_AESDEC(A->S6, B->S6);
-    A->S7 = Meow128_AESDEC(A->S7, B->S7);
-    A->S8 = Meow128_AESDEC(A->S8, B->S8);
-    A->S9 = Meow128_AESDEC(A->S9, B->S9);
-    A->SA = Meow128_AESDEC(A->SA, B->SA);
-    A->SB = Meow128_AESDEC(A->SB, B->SB);
-    A->SC = Meow128_AESDEC(A->SC, B->SC);
-    A->SD = Meow128_AESDEC(A->SD, B->SD);
-    A->SE = Meow128_AESDEC(A->SE, B->SE);
-    A->SF = Meow128_AESDEC(A->SF, B->SF);
+    A->S0 = Meow128_AESDEC(A->S0, Meow128_AESDEC_Finalize(B->S0));
+    A->S1 = Meow128_AESDEC(A->S1, Meow128_AESDEC_Finalize(B->S1));
+    A->S2 = Meow128_AESDEC(A->S2, Meow128_AESDEC_Finalize(B->S2));
+    A->S3 = Meow128_AESDEC(A->S3, Meow128_AESDEC_Finalize(B->S3));
+    A->S4 = Meow128_AESDEC(A->S4, Meow128_AESDEC_Finalize(B->S4));
+    A->S5 = Meow128_AESDEC(A->S5, Meow128_AESDEC_Finalize(B->S5));
+    A->S6 = Meow128_AESDEC(A->S6, Meow128_AESDEC_Finalize(B->S6));
+    A->S7 = Meow128_AESDEC(A->S7, Meow128_AESDEC_Finalize(B->S7));
+    A->S8 = Meow128_AESDEC(A->S8, Meow128_AESDEC_Finalize(B->S8));
+    A->S9 = Meow128_AESDEC(A->S9, Meow128_AESDEC_Finalize(B->S9));
+    A->SA = Meow128_AESDEC(A->SA, Meow128_AESDEC_Finalize(B->SA));
+    A->SB = Meow128_AESDEC(A->SB, Meow128_AESDEC_Finalize(B->SB));
+    A->SC = Meow128_AESDEC(A->SC, Meow128_AESDEC_Finalize(B->SC));
+    A->SD = Meow128_AESDEC(A->SD, Meow128_AESDEC_Finalize(B->SD));
+    A->SE = Meow128_AESDEC(A->SE, Meow128_AESDEC_Finalize(B->SE));
+    A->SF = Meow128_AESDEC(A->SF, Meow128_AESDEC_Finalize(B->SF));
 }
 
 static meow_u128
 MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengthInBytes, int Overhang, meow_u8 *Source)
 {
-    meow_u128 S0 = State->S0;
-    meow_u128 S1 = State->S1;
-    meow_u128 S2 = State->S2;
-    meow_u128 S3 = State->S3;
-    meow_u128 S4 = State->S4;
-    meow_u128 S5 = State->S5;
-    meow_u128 S6 = State->S6;
-    meow_u128 S7 = State->S7;
-    meow_u128 S8 = State->S8;
-    meow_u128 S9 = State->S9;
-    meow_u128 SA = State->SA;
-    meow_u128 SB = State->SB;
-    meow_u128 SC = State->SC;
-    meow_u128 SD = State->SD;
-    meow_u128 SE = State->SE;
-    meow_u128 SF = State->SF;
+    meow_state S0 = State->S0;
+    meow_state S1 = State->S1;
+    meow_state S2 = State->S2;
+    meow_state S3 = State->S3;
+    meow_state S4 = State->S4;
+    meow_state S5 = State->S5;
+    meow_state S6 = State->S6;
+    meow_state S7 = State->S7;
+    meow_state S8 = State->S8;
+    meow_state S9 = State->S9;
+    meow_state SA = State->SA;
+    meow_state SB = State->SB;
+    meow_state SC = State->SC;
+    meow_state SD = State->SD;
+    meow_state SE = State->SE;
+    meow_state SF = State->SF;
     
     // NOTE(casey): Handle as many full 128-bit lanes as possible
     switch(Overhang >> 4)
@@ -451,14 +557,14 @@ MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengt
     // Before Meow v1, we need some definitive analysis of what it should be.
     meow_u128 Mixer = Meow128_Set64x2(Seed - TotalLengthInBytes, Seed + TotalLengthInBytes + 1);
     
-    S0 = Meow128_AESDEC(S0, S8);
-    S1 = Meow128_AESDEC(S1, S9);
-    S2 = Meow128_AESDEC(S2, SA);
-    S3 = Meow128_AESDEC(S3, SB);
-    S4 = Meow128_AESDEC(S4, SC);
-    S5 = Meow128_AESDEC(S5, SD);
-    S6 = Meow128_AESDEC(S6, SE);
-    S7 = Meow128_AESDEC(S7, SF);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S8));
+    S1 = Meow128_AESDEC(S1, Meow128_AESDEC_Finalize(S9));
+    S2 = Meow128_AESDEC(S2, Meow128_AESDEC_Finalize(SA));
+    S3 = Meow128_AESDEC(S3, Meow128_AESDEC_Finalize(SB));
+    S4 = Meow128_AESDEC(S4, Meow128_AESDEC_Finalize(SC));
+    S5 = Meow128_AESDEC(S5, Meow128_AESDEC_Finalize(SD));
+    S6 = Meow128_AESDEC(S6, Meow128_AESDEC_Finalize(SE));
+    S7 = Meow128_AESDEC(S7, Meow128_AESDEC_Finalize(SF));
     
     S0 = Meow128_AESDEC(S0, Mixer);
     S1 = Meow128_AESDEC(S1, Mixer);
@@ -469,19 +575,20 @@ MeowHashFinish(meow_macroblock_result *State, meow_u64 Seed, meow_u64 TotalLengt
     S6 = Meow128_AESDEC(S6, Mixer);
     S7 = Meow128_AESDEC(S7, Mixer);
     
-    S0 = Meow128_AESDEC(S0, S4);
-    S1 = Meow128_AESDEC(S1, S5);
-    S2 = Meow128_AESDEC(S2, S6);
-    S3 = Meow128_AESDEC(S3, S7);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S4));
+    S1 = Meow128_AESDEC(S1, Meow128_AESDEC_Finalize(S5));
+    S2 = Meow128_AESDEC(S2, Meow128_AESDEC_Finalize(S6));
+    S3 = Meow128_AESDEC(S3, Meow128_AESDEC_Finalize(S7));
     
-    S0 = Meow128_AESDEC(S0, S2);
-    S1 = Meow128_AESDEC(S1, S3);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S2));
+    S1 = Meow128_AESDEC(S1, Meow128_AESDEC_Finalize(S3));
     
-    S0 = Meow128_AESDEC(S0, S1);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S1));
     
     S0 = Meow128_AESDEC(S0, Mixer);
-    
-    return(S0);
+
+    meow_u128 Result = Meow128_AESDEC_Finalize(S0);
+    return(Result);
 }
 
 static meow_u128
@@ -572,22 +679,22 @@ MeowHashMergeArray(meow_u64 MacroBlockCount, meow_macroblock_result *MacroBlockH
 static meow_macroblock_result
 MeowHash1Op(int BlockCount, meow_u8 *Source)
 {
-    meow_u128 S0 = Meow128_Zero();
-    meow_u128 S1 = Meow128_Zero();
-    meow_u128 S2 = Meow128_Zero();
-    meow_u128 S3 = Meow128_Zero();
-    meow_u128 S4 = Meow128_Zero();
-    meow_u128 S5 = Meow128_Zero();
-    meow_u128 S6 = Meow128_Zero();
-    meow_u128 S7 = Meow128_Zero();
-    meow_u128 S8 = Meow128_Zero();
-    meow_u128 S9 = Meow128_Zero();
-    meow_u128 SA = Meow128_Zero();
-    meow_u128 SB = Meow128_Zero();
-    meow_u128 SC = Meow128_Zero();
-    meow_u128 SD = Meow128_Zero();
-    meow_u128 SE = Meow128_Zero();
-    meow_u128 SF = Meow128_Zero();
+    meow_state S0 = Meow128_ZeroState();
+    meow_state S1 = Meow128_ZeroState();
+    meow_state S2 = Meow128_ZeroState();
+    meow_state S3 = Meow128_ZeroState();
+    meow_state S4 = Meow128_ZeroState();
+    meow_state S5 = Meow128_ZeroState();
+    meow_state S6 = Meow128_ZeroState();
+    meow_state S7 = Meow128_ZeroState();
+    meow_state S8 = Meow128_ZeroState();
+    meow_state S9 = Meow128_ZeroState();
+    meow_state SA = Meow128_ZeroState();
+    meow_state SB = Meow128_ZeroState();
+    meow_state SC = Meow128_ZeroState();
+    meow_state SD = Meow128_ZeroState();
+    meow_state SE = Meow128_ZeroState();
+    meow_state SF = Meow128_ZeroState();
     
     while(BlockCount--)
     {
@@ -649,22 +756,22 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
     // NOTE(casey): Initialize all 16 streams to 0
     //
     
-    meow_u128 S0 = Meow128_Zero();
-    meow_u128 S1 = Meow128_Zero();
-    meow_u128 S2 = Meow128_Zero();
-    meow_u128 S3 = Meow128_Zero();
-    meow_u128 S4 = Meow128_Zero();
-    meow_u128 S5 = Meow128_Zero();
-    meow_u128 S6 = Meow128_Zero();
-    meow_u128 S7 = Meow128_Zero();
-    meow_u128 S8 = Meow128_Zero();
-    meow_u128 S9 = Meow128_Zero();
-    meow_u128 SA = Meow128_Zero();
-    meow_u128 SB = Meow128_Zero();
-    meow_u128 SC = Meow128_Zero();
-    meow_u128 SD = Meow128_Zero();
-    meow_u128 SE = Meow128_Zero();
-    meow_u128 SF = Meow128_Zero();
+    meow_state S0 = Meow128_ZeroState();
+    meow_state S1 = Meow128_ZeroState();
+    meow_state S2 = Meow128_ZeroState();
+    meow_state S3 = Meow128_ZeroState();
+    meow_state S4 = Meow128_ZeroState();
+    meow_state S5 = Meow128_ZeroState();
+    meow_state S6 = Meow128_ZeroState();
+    meow_state S7 = Meow128_ZeroState();
+    meow_state S8 = Meow128_ZeroState();
+    meow_state S9 = Meow128_ZeroState();
+    meow_state SA = Meow128_ZeroState();
+    meow_state SB = Meow128_ZeroState();
+    meow_state SC = Meow128_ZeroState();
+    meow_state SD = Meow128_ZeroState();
+    meow_state SE = Meow128_ZeroState();
+    meow_state SF = Meow128_ZeroState();
     
     //
     // NOTE(casey): Handle as many full 256-byte blocks as possible (16 cycles per block)
@@ -729,13 +836,13 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
     // Before Meow v1, we need some definitive analysis of what it should be.
     meow_u128 Mixer = Meow128_Set64x2(Seed - TotalLengthInBytes, Seed + TotalLengthInBytes + 1);
     
-    S0 = Meow128_AESDEC(S0, S8);
-    S1 = Meow128_AESDEC(S1, S9);
-    S2 = Meow128_AESDEC(S2, SA);
-    S3 = Meow128_AESDEC(S3, SB);
-    S4 = Meow128_AESDEC(S4, SC);
-    S5 = Meow128_AESDEC(S5, SD);
-    S6 = Meow128_AESDEC(S6, SE);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S8));
+    S1 = Meow128_AESDEC(S1, Meow128_AESDEC_Finalize(S9));
+    S2 = Meow128_AESDEC(S2, Meow128_AESDEC_Finalize(SA));
+    S3 = Meow128_AESDEC(S3, Meow128_AESDEC_Finalize(SB));
+    S4 = Meow128_AESDEC(S4, Meow128_AESDEC_Finalize(SC));
+    S5 = Meow128_AESDEC(S5, Meow128_AESDEC_Finalize(SD));
+    S6 = Meow128_AESDEC(S6, Meow128_AESDEC_Finalize(SE));
     
     S0 = Meow128_AESDEC(S0, Mixer);
     S1 = Meow128_AESDEC(S1, Mixer);
@@ -747,8 +854,7 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
     // NOTE(casey): Deal with individual bytes (5 cycles)
     //
     
-    // TODO(casey): Probably do a different code path for ARM here!
-    // Do they have proper masked gather?
+#if MEOW_HASH_INTEL
     switch(Len & 0xF)
     {
         case 15: // NOTE(casey): 01234567 89AB CD E
@@ -863,6 +969,21 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
         {
         } break;
     }
+#elif MEOW_HASH_ARMV8
+    // TODO(mmozeiko): implement similar code as Intel code-path
+    if (Len & 0xF)
+    {
+        meow_u128 Partial = Meow128_Zero();
+        meow_u8 *Dest = (meow_u8 *)&Partial;
+        for(int Index = 0;
+            Index < (Len & 0xF);
+            ++Index)
+        {
+            *Dest++ = *Source++;
+        }
+        SF = Meow128_AESDEC(SF, Partial);
+    }
+#endif
     
     //
     // NOTE(casey): Finish the part of the mixdown that is dependent on SF
@@ -873,21 +994,22 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
     S5 = Meow128_AESDEC(S5, Mixer);
     S6 = Meow128_AESDEC(S6, Mixer);
     
-    S7 = Meow128_AESDEC(S7, SF);
+    S7 = Meow128_AESDEC(S7, Meow128_AESDEC_Finalize(SF));
     S7 = Meow128_AESDEC(S7, Mixer);
     
-    S0 = Meow128_AESDEC(S0, S4);
-    S1 = Meow128_AESDEC(S1, S5);
-    S2 = Meow128_AESDEC(S2, S6);
-    S3 = Meow128_AESDEC(S3, S7);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S4));
+    S1 = Meow128_AESDEC(S1, Meow128_AESDEC_Finalize(S5));
+    S2 = Meow128_AESDEC(S2, Meow128_AESDEC_Finalize(S6));
+    S3 = Meow128_AESDEC(S3, Meow128_AESDEC_Finalize(S7));
     
-    S0 = Meow128_AESDEC(S0, S2);
-    S1 = Meow128_AESDEC(S1, S3);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S2));
+    S1 = Meow128_AESDEC(S1, Meow128_AESDEC_Finalize(S3));
     
-    S0 = Meow128_AESDEC(S0, S1);
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S1));
     S0 = Meow128_AESDEC(S0, Mixer);
-    
-    return(S0);
+
+    meow_u128 Result = Meow128_AESDEC_Finalize(S0);
+    return(Result);
 }
 
 #if MEOW_HASH_AVX512

@@ -8,9 +8,17 @@
    ======================================================================== */
 
 #if _MSC_VER
+#if _M_AMD64 || _M_IX86
 #include <intrin.h>
+#elif _M_ARM64
+#include <arm64_neon.h>
+#endif
 #else
+#if __x86_64__ || __i386__
 #include <x86intrin.h>
+#elif __aarch64__
+#include <arm_neon.h>
+#endif
 #endif
 
 #include "meow_hash.h"
