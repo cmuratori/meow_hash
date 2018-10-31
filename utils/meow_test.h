@@ -8,11 +8,19 @@
    ======================================================================== */
 
 #if _MSC_VER
+#if _M_AMD64 || _M_IX86
 #include <intrin.h>
+#elif _M_ARM64
+#include <arm64_neon.h>
+#endif
 #define TRY __try
 #define CATCH __except(1)
 #else
+#if __x86_64__ || __i386__
 #include <x86intrin.h>
+#elif __aarch64__
+#include <arm_neon.h>
+#endif
 #define TRY try
 #define CATCH catch(...)
 #endif
