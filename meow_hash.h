@@ -970,18 +970,133 @@ MeowHash1(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
         } break;
     }
 #elif MEOW_HASH_ARMV8
-    // TODO(mmozeiko): implement similar code as Intel code-path
-    if (Len & 0xF)
+    switch(Len & 0xF)
     {
-        meow_u128 Partial = Meow128_Zero();
-        meow_u8 *Dest = (meow_u8 *)&Partial;
-        for(int Index = 0;
-            Index < (Len & 0xF);
-            ++Index)
+        case 15: // NOTE(casey): 01234567 89AB CD E
         {
-            *Dest++ = *Source++;
-        }
-        SF = Meow128_AESDEC(SF, Partial);
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)(Source + 8), vreinterpretq_u32_u8(Partial), 2));
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)(Source + 12), vreinterpretq_u16_u8(Partial), 6));
+            Partial = vsetq_lane_u8(*(meow_u8 *)(Source + 14), Partial, 14);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case 14: // NOTE(casey): 01234567 89AB CD
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)(Source + 8), vreinterpretq_u32_u8(Partial), 2));
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)(Source + 12), vreinterpretq_u16_u8(Partial), 6));
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case 13: // NOTE(casey): 01234567 89AB C
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)(Source + 8), vreinterpretq_u32_u8(Partial), 2));
+            Partial = vsetq_lane_u8(*(meow_u8 *)(Source + 12), Partial, 12);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case 12: // NOTE(casey): 01234567 89AB
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)(Source + 8), vreinterpretq_u32_u8(Partial), 2));
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case 11: // NOTE(casey): 01234567 89 A
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)(Source + 8), vreinterpretq_u16_u8(Partial), 4));
+            Partial = vsetq_lane_u8(*(meow_u8 *)(Source + 10), Partial, 10);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case 10: // NOTE(casey): 01234567 89
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)(Source + 8), vreinterpretq_u16_u8(Partial), 4));
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  9: // NOTE(casey): 01234567 8
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            Partial = vsetq_lane_u8(*(meow_u8 *)(Source + 8), Partial, 8);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  8: // NOTE(casey): 01234567
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u64(vsetq_lane_u64(*(meow_u64 *)Source, vreinterpretq_u64_u8(Partial), 0));
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  7: // NOTE(casey): 0123 45 6
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)Source, vreinterpretq_u32_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)(Source + 4), vreinterpretq_u16_u8(Partial), 2));
+            Partial = vsetq_lane_u8(*(meow_u8 *)(Source + 6), Partial, 6);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  6: // NOTE(casey): 0123 45
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)Source, vreinterpretq_u32_u8(Partial), 0));
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)(Source + 4), vreinterpretq_u16_u8(Partial), 2));
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  5: // NOTE(casey): 0123 4
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)Source, vreinterpretq_u32_u8(Partial), 0));
+            Partial = vsetq_lane_u8(*(meow_u8 *)(Source + 4), Partial, 4);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  4: // NOTE(casey): 0123
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u32(vsetq_lane_u32(*(meow_u32 *)Source, vreinterpretq_u32_u8(Partial), 0));
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  3: // NOTE(casey): 01 2
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)Source, vreinterpretq_u16_u8(Partial), 0));
+            Partial = vsetq_lane_u8(*(meow_u8 *)(Source + 2), Partial, 2);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  2: // NOTE(casey): 01
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vreinterpretq_u8_u16(vsetq_lane_u16(*(meow_u16 *)Source, vreinterpretq_u16_u8(Partial), 0));
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        case  1: // NOTE(casey): 0
+        {
+            meow_u128 Partial = Meow128_Zero();
+            Partial = vsetq_lane_u8(*(meow_u8 *)Source, Partial, 0);
+            SF = Meow128_AESDEC(SF, Partial);
+        } break;
+
+        default:
+        {
+        } break;
     }
 #endif
     
