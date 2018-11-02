@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef __aarch64__
 // NOTE(mmozeiko): On ARM you normally cannot access cycle counter from user-space.
@@ -22,87 +23,342 @@
 
 #include "meow_test.h"
 
-//
-// NOTE(casey): Minimalist code for testing threading.
-// DO NOT use this kind of code for running Meow hash in your actual
-// application!  It should be integrated properly into whatever thread pool /
-// job system you are using!
-//
-// {
-//
+#define Kb(x) ((meow_u64)(x)*(meow_u64)1024)
+#define Mb(x) ((meow_u64)(x)*(meow_u64)1024*(meow_u64)1024)
+#define Gb(x) ((meow_u64)(x)*(meow_u64)1024*(meow_u64)1024*(meow_u64)1024)
 
-#if _WIN32
-#include <windows.h>
-
-static meow_macroblock_op * volatile WorkOp;
-static meow_macroblock_result WorkResults[1024];
-static meow_source_blocks Work;
-
-static volatile long WorkNumber;
-static volatile long CompletionNumber;
-static volatile long CompletionNumberTarget;
-
-static void
-DoThreadWork(void)
+enum input_size_type
 {
-    if(WorkNumber < CompletionNumberTarget)
-    {
-        int WorkUnit = _InterlockedExchangeAdd(&WorkNumber, 1);
-        if(WorkUnit < CompletionNumberTarget)
-        {
-            meow_macroblock Macroblock = MeowGetMacroblock(&Work, WorkUnit);
-            WorkResults[WorkUnit] = WorkOp(Macroblock.BlockCount, Macroblock.Source);
-            _InterlockedExchangeAdd(&CompletionNumber, 1);
-        }
-    }
-}
+    InputSizeType_Tiny0,
+    InputSizeType_Tiny1,
+    InputSizeType_Tiny2,
+    InputSizeType_Tiny3,
+    
+    InputSizeType_Small,
+    InputSizeType_Medium,
+    InputSizeType_Large,
+    InputSizeType_Giant,
+    
+    InputSizeType_Count,
+};
 
-static DWORD WINAPI
-ThreadEntry(LPVOID Parameter)
+struct test_results
 {
-    for(;;)
-    {
-        DoThreadWork();
-    }
-}
-#endif
-
-//
-// }
-//
-
-struct best_result
-{
+    int unsigned HashType;
+    
     meow_u64 Size;
-    meow_u64 Clocks;
+    meow_u64 MinimumClocks;
+    meow_u64 MedianClocks;
+    
+    // NOTE(casey): We follow Fabian Giesen's lead here and prefer the median performance
+    // to the fastest, in the hopes that we will not consider a hash's performance to be
+    // an unusual confluence of chip power distributions and branch predictions that give it
+    // a few really good runs that aren't indicative of its typical performance.
+    double MedianBPC;
+};
+
+struct input_size_test
+{
+    meow_u64 ClockCount;
+    meow_u64 *Clocks;
+    
+    // NOTE(casey): We use a fake result target for writing in hopes of convincing the optimizer
+    // that the computed hashes are actually used, and so won't be optimized out.
+    meow_u128 FakeSlot;
+    
+    meow_u64 Size;
+};
+
+#define SIZE_COUNT_PER_BATCH 16
+struct input_size_tests
+{
+    meow_u64 MaxClockCount;
+    meow_u64 RunsPerHashImplementation;
+    input_size_test Sizes[SIZE_COUNT_PER_BATCH];
+
+    int unsigned ResultCount;
+    test_results Results[SIZE_COUNT_PER_BATCH * InputSizeType_Count * ArrayCount(NamedHashTypes)];
+    
+    char *Name;
 };
 
 static void
-FuddleBuffer(meow_u64 Size, void *Buffer)
+FuddleBuffer(meow_u64 Size, void *Buffer, int Seed)
 {
-    // NOTE(casey): This code is here for literally no purpose other than to prevent CLANG from
-    // optimizing out loads, since apparently it thinks it doesn't have to actually read from
-    // uninitialized memory, WHICH IS ABSURD and this whole undefined behavior thing is completely
-    // unacceptable.  Spec writers are ALL FIRED.
-    meow_u8 *Dest = (meow_u8 *)Buffer;
+    meow_u128 *Dest = (meow_u128 *)Buffer;
+    meow_u128 Stamp = Meow128_Set64x2(Seed, Seed + 1);
     for(meow_u64 Index = 0;
-        Index < Size;
+        Index < (Size >> 4);
         ++Index)
     {
-        Dest[Index] = 13*Index;
+        *Dest++ = Stamp;
+    }
+    
+    meow_u8 *Overhang = (meow_u8 *)Dest;
+    for(meow_u64 Index = 0;
+        Index < (Size & 0xF);
+        ++Index)
+    {
+        Overhang[Index] = 13*Index + Seed;
     }
 }
 
+static int
+ResultCompare(const void *AInit, const void *BInit)
+{
+    test_results *A = (test_results *)AInit;
+    test_results *B = (test_results *)BInit;
+    
+    int Result = 0;
+    if(A->Size > B->Size)
+    {
+        Result = 1;
+    }
+    else if(A->Size < B->Size)
+    {
+        Result = -1;
+    }
+    else if(A->MedianClocks > B->MedianClocks)
+    {
+        Result = 1;
+    }
+    else if(A->MedianClocks < B->MedianClocks)
+    {
+        Result = -1;
+    }
+    
+    return(Result);
+}
+
+static int
+ClockCompare(const void *AInit, const void *BInit)
+{
+    meow_u64 A = *(meow_u64 *)AInit;
+    meow_u64 B = *(meow_u64 *)BInit;
+    
+    int Result = 0;
+    if(A > B)
+    {
+        Result = 1;
+    }
+    else if(B < A)
+    {
+        Result = -1;
+    }
+    
+    return(Result);
+}
+
+static test_results *
+ComputeStats(int unsigned HashType, input_size_test *Test, input_size_tests *DestTests)
+{
+    test_results *Results = 0;
+    
+    if(DestTests->ResultCount < ArrayCount(DestTests->Results))
+    {
+        Results = DestTests->Results + DestTests->ResultCount++;
+        Results->HashType = HashType;
+        Results->Size = Test->Size;
+        
+        if(Test->ClockCount)
+        {
+            qsort(Test->Clocks, Test->ClockCount, sizeof(Test->Clocks[0]), ClockCompare);
+            Results->MinimumClocks = Test->Clocks[0];
+            Results->MedianClocks = Test->Clocks[Test->ClockCount / 2];
+            Results->MedianBPC = (double)Test->Size / (double)Results->MedianClocks;
+        }
+    }
+    
+    return(Results);
+}
+
+static void
+InitializeTests(input_size_tests *Tests, input_size_type Type, meow_u64 MaxClockCount)
+{
+    int unsigned SmallOffset[] =
+    {
+        7,
+        12,
+        3,
+        5,
+        
+        15,
+        8,
+        6,
+        4,
+        
+        11,
+        1,
+        14,
+        0,
+        
+        9,
+        10,
+        2,
+        13,
+    };
+    
+    int unsigned RegularOffset[] =
+    {
+        1,
+        2,
+        3,
+        7,
+        
+        15,
+        15 + 11,
+        31,
+        31 + 15,
+        
+        63,
+        63 + 31,
+        127,
+        127 + 63,
+        
+        255,
+        255 + 127,
+        511,
+        513,
+    };
+    
+    char *Name = (char *)"(unnamed test)";
+    meow_u64 Divisor = 1;
+    for(int unsigned SizeIndex = 0;
+        SizeIndex < ArrayCount(Tests->Sizes);
+        ++SizeIndex)
+    {
+        meow_u64 Size = 0;
+        switch(Type)
+        {
+            case InputSizeType_Tiny0:
+            {
+                Name = (char *)"Tiny Input (Pass 1)";
+                Size = 16*SizeIndex + SmallOffset[(0 + SizeIndex) % ArrayCount(SmallOffset)];
+            } break;
+            
+            case InputSizeType_Tiny1:
+            {
+                Name = (char *)"Tiny Input (Pass 2)";
+                Size = 16*SizeIndex + SmallOffset[(4 + SizeIndex) % ArrayCount(SmallOffset)];
+            } break;
+            
+            case InputSizeType_Tiny2:
+            {
+                Name = (char *)"Tiny Input (Pass 3)";
+                Size = 16*SizeIndex + SmallOffset[(8 + SizeIndex) % ArrayCount(SmallOffset)];
+            } break;
+            
+            case InputSizeType_Tiny3:
+            {
+                Name = (char *)"Tiny Input (Pass 4)";
+                Size = 16*SizeIndex + SmallOffset[(12 + SizeIndex) % ArrayCount(SmallOffset)];
+            } break;
+            
+            case InputSizeType_Small:
+            {
+                Name = (char *)"Small Input";
+                Size = (Kb(SizeIndex + 1)) + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
+                Divisor = 10;
+            } break;
+            
+            case InputSizeType_Medium:
+            {
+                Name = (char *)"Medium Input";
+                Size = (Kb(32 * (SizeIndex + 1))) + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
+                Divisor = 200;
+            } break;
+            
+            case InputSizeType_Large:
+            {
+                Name = (char *)"Large Input";
+                Size = (Mb(SizeIndex + 1)) + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
+                Divisor = 15000;
+            } break;
+            
+            case InputSizeType_Giant:
+            {
+                Name = (char *)"Giant Input";
+                Size = (Gb(SizeIndex + 1)) / 4 + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
+                Divisor = 1000000;
+            } break;
+            
+            default:
+            {
+                fprintf(stderr, "ERROR: Invalid test sizes type requested.\n");
+            } break;
+        }
+        
+        Tests->Sizes[SizeIndex].Size = Size;
+    }
+
+    Tests->Name = Name;
+    Tests->MaxClockCount = (MaxClockCount / Divisor);
+    Tests->RunsPerHashImplementation = (ArrayCount(Tests->Sizes) * Tests->MaxClockCount);
+}
+
+static void
+PrintLeaderboard(input_size_tests *Tests, FILE *Stream)
+{
+    fprintf(Stream, "Leaderboard:\n");
+    
+    qsort(Tests->Results, Tests->ResultCount, sizeof(Tests->Results[0]), ResultCompare);
+    
+    int unsigned ResultIndex = 0;
+    while(ResultIndex < Tests->ResultCount)
+    {
+        test_results *BestResults = Tests->Results + ResultIndex;
+        
+        meow_u64 CurSize = BestResults->Size;
+        meow_u64 MedianClocks = BestResults->MedianClocks;
+        meow_u64 MaxClocks = MedianClocks + (MedianClocks/ 100);
+        
+        fprintf(Stream, "    ");
+        PrintSize(Stream, BestResults->Size, true);
+        fprintf(Stream, ": %10.0f (%6.03f bytes/cycle) - ",
+                (double)BestResults->MedianClocks, (double)BestResults->MedianBPC);
+        
+        int TieCount = 0;
+        while(ResultIndex < Tests->ResultCount)
+        {
+            test_results *Results = Tests->Results + ResultIndex;
+            if(Results->Size == CurSize)
+            {
+                if(Results->MedianClocks <= MaxClocks)
+                {
+                    named_hash_type Type = NamedHashTypes[Results->HashType];
+                    
+                    if(TieCount)
+                    {
+                        fprintf(Stream, ", ");
+                    }
+                    
+                    fprintf(Stream, "%s", Type.FullName);
+                    
+                    ++TieCount;
+                }
+                ++ResultIndex;
+            }
+            else
+            {
+                break;
+            }
+        }
+        if(TieCount > 1)
+        {
+            fprintf(Stream, " (%d-way tie)", TieCount);
+        }
+        fprintf(Stream, "\n");
+    }
+}
+        
 int
 main(int ArgCount, char **Args)
 {
 #if __aarch64__
     enable_pmu(0x008);
 #endif
-
-    //
-    // NOTE(casey): Print the banner and status
-    //
+    
+    InitializeHashesThatNeedInitializers();
     
     fprintf(stderr, "\n");
     fprintf(stderr, "meow_bench %s - basic RDTSC-based benchmark for the Meow hash\n", MEOW_HASH_VERSION_NAME);
@@ -111,309 +367,219 @@ main(int ArgCount, char **Args)
     fprintf(stderr, "             (You must turn it off in your OS if you haven't yet!)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Versions compiled into this benchmark:\n");
-    for(int TypeIndex = 0;
-        TypeIndex < ArrayCount(NamedHashTypes);
+    
+    meow_u64 MaxClockCount = (meow_u64)10000000;
+    input_size_tests *Tests = (input_size_tests *)aligned_alloc(4, sizeof(input_size_tests));
+    
+    int unsigned TypeCount = ArrayCount(NamedHashTypes);
+    for(int unsigned TypeIndex = 0;
+        TypeIndex < TypeCount;
         ++TypeIndex)
     {
         named_hash_type Type = NamedHashTypes[TypeIndex];
         fprintf(stderr, "    %d. %s\n", TypeIndex + 1, Type.FullName);
     }
     
-    fprintf(stderr, "\n");
-    
-    //
-    // NOTE(casey): Check if we're testing everybody, or just Meow
-    //
-    int AllowOthers = !(((ArgCount == 2) && (strcmp(Args[1], "meow") == 0)));
-    
-    //
-    // NOTE(casey): Test single-thread performance for each implementation on increasingly large input sizes
-    //
-    
-    meow_u64 MaxClocksWithoutDrop = 4000000000ULL;
-    best_result Bests[38] = {};
-    double BytesPerCycle[ArrayCount(NamedHashTypes)][ArrayCount(Bests)] = {};
-    
+    for(int unsigned SizeIndex = 0;
+        SizeIndex < ArrayCount(Tests->Sizes);
+        ++SizeIndex)
     {
-        int BestIndex = 0;
-        Bests[BestIndex++].Size = 1;
-        Bests[BestIndex++].Size = 7;
-        Bests[BestIndex++].Size = 8;
-        Bests[BestIndex++].Size = 15;
-        Bests[BestIndex++].Size = 16;
-        Bests[BestIndex++].Size = 31;
-        Bests[BestIndex++].Size = 32;
-        Bests[BestIndex++].Size = 63;
-        Bests[BestIndex++].Size = 64;
-        Bests[BestIndex++].Size = 127;
-        Bests[BestIndex++].Size = 128;
-        Bests[BestIndex++].Size = 255;
-        Bests[BestIndex++].Size = 256;
-        Bests[BestIndex++].Size = 511;
-        Bests[BestIndex++].Size = 512;
-        Bests[BestIndex++].Size = 1023;
-        Bests[BestIndex++].Size = 1024;
-        meow_u64 Size = Bests[BestIndex - 1].Size;
-        while(BestIndex < ArrayCount(Bests))
-        {
-            Size *= 2;
-            Bests[BestIndex++].Size = Size;
-        }
+        Tests->Sizes[SizeIndex].Clocks = (meow_u64 *)aligned_alloc(4, MaxClockCount*sizeof(meow_u64));
     }
     
+    fprintf(stderr, "\n");
+    
+    for(int unsigned SizeType = 0;
+        SizeType < InputSizeType_Count;
+        ++SizeType)
     {
-        fprintf(stderr, "Single-threaded performance:\n");
-        for(int Batch = 0;
-            Batch < ArrayCount(Bests);
-            ++Batch)
+        int unsigned TestCount = ArrayCount(Tests->Sizes);
+
+        InitializeTests(Tests, (input_size_type)SizeType, MaxClockCount);
+        fprintf(stderr, "\n----------------------------------------------------\n");
+        fprintf(stderr, "\n%s\n", Tests->Name);
+        fprintf(stderr, "\n----------------------------------------------------\n");
+        
+        // NOTE(casey): Allocate a buffer for input - if we can't get the biggest one we need, reduce the largest
+        // test down to something we _can_ allocate
+        void *Buffer = 0;
+        while(TestCount)
         {
-            best_result *ThisBest = Bests + Batch;
-            meow_u64 Size = ThisBest->Size;
-            ThisBest->Clocks = (meow_u64)-1ULL;
-            
-            void *Buffer = aligned_alloc(MEOW_HASH_ALIGNMENT, Size);
+            Buffer = aligned_alloc(CACHE_LINE_ALIGNMENT, Tests->Sizes[TestCount - 1].Size);
             if(Buffer)
             {
-                FuddleBuffer(Size, Buffer);
-                fprintf(stderr, "  Fewest cycles to hash ");
-                PrintSize(stderr, Size, false);
-                fprintf(stderr, ":\n");
-                
-                for(int TypeIndex = 0;
-                    TypeIndex < ArrayCount(NamedHashTypes);
-                    ++TypeIndex)
-                {
-                    named_hash_type Type = NamedHashTypes[TypeIndex];
-                    if(AllowOthers || Type.Op)
-                    {
-                        TRY
-                        {
-                            meow_u64 ClocksSinceLastDrop = 0;
-                            meow_u64 BestClocks = (meow_u64)-1ULL;
-                            int TryIndex = 0;
-                            while((TryIndex < 10) || (ClocksSinceLastDrop < MaxClocksWithoutDrop))
-                            {
-                                meow_u64 StartClock = __rdtsc();
-                                Type.Imp(0, Size, Buffer);
-                                meow_u64 EndClock = __rdtsc();
-                                
-                                meow_u64 Clocks = EndClock - StartClock;
-                                ClocksSinceLastDrop += Clocks;
-                                
-                                if(BestClocks > Clocks)
-                                {
-                                    ClocksSinceLastDrop = 0;
-                                    BestClocks = Clocks;
-                                }
-                                
-                                ++TryIndex;
-                            }
-                            
-                            double BPC = (double)Size / (double)BestClocks;
-                            fprintf(stderr, "    %32s %10.0f (%3.03f bytes/cycle)\n",
-                                    Type.FullName, (double)BestClocks, BPC);
-                            fflush(stderr);
-                            
-                            BytesPerCycle[TypeIndex][Batch] = BPC;
-                            
-                            if(ThisBest->Clocks > BestClocks)
-                            {
-                                ThisBest->Clocks = BestClocks;
-                            }
-                        }
-                        CATCH
-                        {
-                            if(Batch == 0)
-                            {
-                                fprintf(stderr, "(%s not supported on this CPU)\n",
-                                        Type.FullName);
-                                Type.Op = 0;
-                            }
-                        }
-                    }
-                }
-                
-                free(Buffer);
+                break;
+            }
+            else
+            {
+                --TestCount;
             }
         }
-    }
-    
-    fprintf(stderr, "\n");
-    
-    //
-    // NOTE(casey): Print the single-thread leaderboard (whichever hash was fastest)
-    //
-    
-    fprintf(stderr, "Leaderboard:\n");
-    for(int BestIndex = 0;
-        BestIndex < ArrayCount(Bests);
-        ++BestIndex)
-    {
-        best_result *Best = Bests + BestIndex;
-        fprintf(stderr, "  ");
-        PrintSize(stderr, Best->Size, true);
-        double BPC = (double)Best->Size / (double)Best->Clocks;
-        fprintf(stderr, ": %10.0f (%3.03f bytes/cycle) - ",
-                (double)Best->Clocks, BPC);
         
-        int TieCount = 0;
-        for(int TypeIndex = 0;
-            TypeIndex < ArrayCount(NamedHashTypes);
-            ++TypeIndex)
+        //
+        // NOTE(casey): Run the test sizes through each hash, "randomizing" the order to hopefully thwart the branch predictors as much as possible
+        //
+        
+        if(Buffer)
         {
-            if(BPC == BytesPerCycle[TypeIndex][BestIndex])
+            meow_u64 RunsPerHashImplementation = Tests->RunsPerHashImplementation;
+            meow_u64 TestRandSeed = (meow_u64)time(0);
+            for(int unsigned TypeIndex = 0;
+                TypeIndex < TypeCount;
+                ++TypeIndex)
             {
                 named_hash_type Type = NamedHashTypes[TypeIndex];
+                fprintf(stderr, "\n%s:\n", Type.FullName);
                 
-                if(TieCount)
+                // NOTE(casey): Clear the clock count
+                for(int unsigned SizeIndex = 0;
+                    SizeIndex < ArrayCount(Tests->Sizes);
+                    ++SizeIndex)
                 {
-                    fprintf(stderr, ", ");
+                    Tests->Sizes[SizeIndex].ClockCount = 0;
                 }
                 
-                fprintf(stderr, "%s", Type.FullName);
-                
-                ++TieCount;
+                TRY
+                {
+                    meow_u64 ClocksSinceLastStatus = 0;
+                    meow_u64 TestRand = TestRandSeed;
+                    for(int unsigned RunIndex = 0;
+                         RunIndex < Tests->RunsPerHashImplementation;
+                         ++RunIndex)
+                    {
+                        // NOTE(casey): This is a XorShift64* LCG followed by an
+                        // O'Neill random rotation
+                        TestRand ^= TestRand >> 12;
+                        TestRand ^= TestRand << 25;
+                        TestRand ^= TestRand >> 27;
+                        int unsigned UseIndex = _rotl((int unsigned)((TestRand ^ (TestRand>>18))>>27), (int)(TestRand >> 59));
+                        TestRand = TestRand * 2685821657736338717LL;
+                        
+                        input_size_test *Test = Tests->Sizes + (UseIndex % TestCount);
+                        
+                        meow_u64 Size = Test->Size;
+                        
+                        // NOTE(casey): Write junk into the buffer to try to thwart the optimizer from removing the actual function call.
+                        // This should also warm the cache so that small inputs will be read from cache instead of from memory.
+                        FuddleBuffer(Size, Buffer, RunIndex);
+                        
+                        int Ignored[4];
+                        int unsigned Ignored2;
+                        __cpuid(Ignored, 0);
+                        meow_u64 StartClock = __rdtsc();
+                        Test->FakeSlot = Type.Imp(0, Size, Buffer);
+                        meow_u64 EndClock = __rdtscp(&Ignored2);
+                        __cpuid(Ignored, 0);
+                        
+                        meow_u64 Clocks = EndClock - StartClock;
+                        if(Test->ClockCount < Tests->MaxClockCount)
+                        {
+                            Test->Clocks[Test->ClockCount++] = Clocks;
+                        }
+                        
+                        ClocksSinceLastStatus += Clocks;
+                        if((RunIndex == (RunsPerHashImplementation - 1)) ||
+                           (ClocksSinceLastStatus > 1000000000ULL))
+                        {
+                            ClocksSinceLastStatus = 0;
+                            fprintf(stderr, "\r    Test %0.0f / %0.0f (%0.0f%%)",
+                                    (double)(RunIndex + 1), (double)RunsPerHashImplementation,
+                                    100.0f * (double)(RunIndex + 1) / (double)RunsPerHashImplementation);
+                        }
+                    }
+                    fprintf(stderr, "\n");
+                    
+                    for(int TestIndex = 0;
+                        TestIndex < TestCount;
+                        ++TestIndex)
+                    {
+                        input_size_test *Test = Tests->Sizes + TestIndex;
+                        test_results *Results = ComputeStats(TypeIndex, Test, Tests);
+                        if(Results)
+                        {
+                            fprintf(stderr, "    ");
+                            PrintSize(stderr, Test->Size, true);
+                            
+                            fprintf(stderr, ": %0.03f bytes/cycle (%0.0f min, %0.0f med in %0.0f samples)\n",
+                                    (double)Results->MedianBPC, (double)Results->MinimumClocks, (double)Results->MedianClocks,
+                                    (double)Test->ClockCount);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "ERROR: Out of result space!\n");
+                        }
+                    }
+                    
+                    //
+                    // NOTE(casey): Print the incremental leaderboard
+                    //
+                    PrintLeaderboard(Tests, stderr);
+                    fflush(stderr);
+                }
+                CATCH
+                {
+                    fprintf(stderr, "    (not supported on this CPU)\n");
+                }
             }
+            
+            free(Buffer);
         }
-        if(TieCount > 1)
-        {
-            fprintf(stderr, " (%d-way tie)", TieCount);
-        }
+        
         fprintf(stderr, "\n");
+        
+        fprintf(stderr, "\n");
+        fflush(stderr);
     }
     
-    fprintf(stderr, "\n");
-    
+    //
+    // NOTE(casey): Print the final leaderboard
+    //
+    PrintLeaderboard(Tests, stderr);
+                                  
     //
     // NOTE(casey): Print a CSV-style section for peeps who want to graph
     //
-
+    
+    meow_u64 LastSize = 0;
     fprintf(stdout, "Input");
-    for(int TypeIndex = 0;
-        TypeIndex < ArrayCount(NamedHashTypes);
-        ++TypeIndex)
+    for(int ResultIndex = 0;
+        ResultIndex < Tests->ResultCount;
+        ++ResultIndex)
     {
-        named_hash_type Type = NamedHashTypes[TypeIndex];
-        fprintf(stdout, ",%s", Type.FullName);
+        test_results *Results = Tests->Results + ResultIndex;
+        if(Results->Size != LastSize)
+        {
+            fprintf(stdout, ",");
+            LastSize = Results->Size;
+            PrintSize(stdout, LastSize, false);
+        }
     }
     fprintf(stdout, "\n");
     
-    for(int BestIndex = 0;
-        BestIndex < ArrayCount(Bests);
-        ++BestIndex)
+    for(int TypeIndex = 0;
+        TypeIndex < TypeCount;
+        ++TypeIndex)
     {
-        best_result *Best = Bests + BestIndex;
-        PrintSize(stdout, Best->Size, false);
-        
-        for(int TypeIndex = 0;
-            TypeIndex < ArrayCount(NamedHashTypes);
-            ++TypeIndex)
+        named_hash_type Type = NamedHashTypes[TypeIndex];
+        fprintf(stdout, "%s", Type.FullName);
+        for(int ResultIndex = 0;
+            ResultIndex < Tests->ResultCount;
+            ++ResultIndex)
         {
-            fprintf(stdout, ",%f", BytesPerCycle[TypeIndex][BestIndex]);
+            test_results *Results = Tests->Results + ResultIndex;
+            if(Results->HashType == TypeIndex)
+            {
+                fprintf(stdout, ",%f", Results->MedianBPC);
+            }
         }
         fprintf(stdout, "\n");
     }
     fprintf(stdout, "\n");
     fflush(stdout);
     
-#if _WIN32
-    //
-    // NOTE(casey): Test multiple-thread performance for each Meow implementation
-    //
-    
-    {
-        SYSTEM_INFO SystemInfo = {};
-        GetSystemInfo(&SystemInfo);
-        int MaxThreadCount = SystemInfo.dwNumberOfProcessors + 2;
-        
-        int Size = 1024*1024*1024;
-        fprintf(stderr, "Multi-threaded performance (Meow only):\n");
-        for(int ThreadCount = 1;
-            ThreadCount < MaxThreadCount;
-            ++ThreadCount)
-        {
-            void *Buffer = aligned_alloc(MEOW_HASH_ALIGNMENT, Size);
-            FuddleBuffer(Size, Buffer);
-            meow_u128 ReferenceHash = MeowHash1(0, Size, Buffer);
-            Work = MeowSourceBlocksFor(Size, Buffer);
-            
-            for(int TypeIndex = 0;
-                TypeIndex < ArrayCount(NamedHashTypes);
-                ++TypeIndex)
-            {
-                named_hash_type Type = NamedHashTypes[TypeIndex];
-                if(Type.Op)
-                {
-                    WorkOp = Type.Op;
-                    meow_u64 BestClocks = (meow_u64)-1ULL;
-                    for(int Test = 0;
-                        Test < 100;
-                        ++Test)
-                    {
-                        InterlockedAnd(&CompletionNumberTarget, 0);
-                        _ReadWriteBarrier(); _mm_mfence();
-                        CompletionNumber = 0;
-                        WorkNumber = 0;
-                        _ReadWriteBarrier(); _mm_mfence();
-                        
-                        meow_u64 StartClock = __rdtsc();
-                        CompletionNumberTarget = Work.MacroblockCount;
-                        while(CompletionNumber < CompletionNumberTarget)
-                        {
-                            DoThreadWork();
-                        }
-                        
-                        _ReadWriteBarrier();
-                        
-                        // TODO(casey): Technically I would like to force a re-read of WorkResults here.
-                        // I don't really know how to convince the compiler to do that.  Currently it does,
-                        // but it'd be nice to guard against a day when it learns to optimize it out.  I
-                        // want something like "this is a barrier where you have to treat it as volatile
-                        // between before and after the barrier", which I don't think exists?  Like a
-                        // "consider_this_pointers_memory_changed_as_of_right_now()" intrinsic.
-                        
-                        meow_macroblock_result Group = MeowHashMergeArray(Work.MacroblockCount, WorkResults);
-                        meow_u128 Hash = MeowHashFinish(&Group, 0, Work.TotalLengthInBytes, Work.Overhang, Work.OverhangStart);
-                        
-                        _ReadWriteBarrier();
-                        
-                        meow_u64 EndClock = __rdtsc();
-                        
-                        if(!MeowHashesAreEqual(Hash, ReferenceHash))
-                        {
-                            fprintf(stderr, "ERROR: Multithreaded hash failed to produce the same hash as the single-threaded hash!\n");
-                            ExitProcess(0);
-                        }
-                        
-                        meow_u64 Clocks = EndClock - StartClock;
-                        if(BestClocks > Clocks)
-                        {
-                            BestClocks = Clocks;
-                            fprintf(stderr, "\r%s fastest hash of ", Type.FullName);
-                            PrintSize(stderr, Size, false);
-                            fprintf(stderr, " on %u thread%s: %0.0f (%f bytes/cycle)               ",
-                                    ThreadCount, (ThreadCount == 1) ? " " : "s", (double)BestClocks, (double)Size / (double)BestClocks);
-                            fflush(stderr);
-                            Test = 0;
-                        }
-                    }
-                    fprintf(stderr, "\n");
-                }
-            }
-            
-            free(Buffer);
-        
-            DWORD ThreadID;
-            CloseHandle(CreateThread(0, 0, ThreadEntry, 0, 0, &ThreadID));
-        }
-    }
-    
-    ExitProcess(0);
-#endif
-    
 #if __aarch64__
     disable_pmu(0x008);
 #endif
-
+    
     return(0);
 }

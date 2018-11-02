@@ -93,7 +93,7 @@ ReadEntireFile(test_group *Group, char *Filename)
         Result.Size = ftell(File);
         fseek(File, 0, SEEK_SET);
         
-        Result.Contents = aligned_alloc(MEOW_HASH_ALIGNMENT, Result.Size);
+        Result.Contents = aligned_alloc(CACHE_LINE_ALIGNMENT, Result.Size);
         if(Result.Contents)
         {
             if(Result.Size)
@@ -297,6 +297,8 @@ static void IngestDirectoriesRecursively(test_group *Group, char *Path);
 int main(int ArgCount, char **Args)
 {
     int Result = -1;
+
+    InitializeHashesThatNeedInitializers();
     
     if(ArgCount == 3)
     {
@@ -411,7 +413,7 @@ DeallocPath(char *A)
 static void
 IngestDirectoriesRecursively(test_group *Group, char *Path)
 {
-    char *Wildcard = AllocPath(Path, "*");
+    char *Wildcard = AllocPath(Path, (char *)"*");
     
     WIN32_FIND_DATAA FindData;
     HANDLE SearchHandle = FindFirstFileExA(Wildcard, FindExInfoBasic, &FindData,
