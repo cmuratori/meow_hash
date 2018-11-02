@@ -70,9 +70,11 @@
 #if MEOW_HASH_INTEL
 
 #define meow_u128 __m128i
-#define meow_state __m128i
+#define meow_aes_128 __m128i
 #define meow_u256 __m256i
+#define meow_aes_256 __m256i
 #define meow_u512 __m512i
+#define meow_aes_512 __m512i
 
 #define Meow128_AreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A), (B))) == 0xFFFF)
 #define Meow128_AESDEC(Prior, Xor) _mm_aesdec_si128((Prior), (Xor))
@@ -116,7 +118,7 @@
 typedef struct {
     meow_u128 A;
     meow_u128 B;
-} meow_state;
+} meow_aes_128;
 
 static int
 Meow128_AreEqual(meow_u128 A, meow_u128 B)
@@ -134,26 +136,26 @@ Meow128_AreEqual(meow_u128 A, meow_u128 B)
     return Output == 0xFFFF;
 }
 
-static meow_state
-Meow128_AESDEC(meow_state Prior, meow_u128 Xor)
+static meow_aes_128
+Meow128_AESDEC(meow_aes_128 Prior, meow_u128 Xor)
 {
-    meow_state R;
+    meow_aes_128 R;
     R.A = vaesimcq_u8(vaesdq_u8(Prior.A, Prior.B));
     R.B = Xor;
     return(R);
 }
 
-static meow_state
-Meow128_AESDEC_Mem(meow_state Prior, void *Xor)
+static meow_aes_128
+Meow128_AESDEC_Mem(meow_aes_128 Prior, void *Xor)
 {
-    meow_state R;
+    meow_aes_128 R;
     R.A = vaesimcq_u8(vaesdq_u8(Prior.A, Prior.B));
     R.B = vld1q_u8((meow_u8*)Xor);
     return(R);
 }
 
 static meow_u128
-Meow128_AESDEC_Finalize(meow_state Value)
+Meow128_AESDEC_Finalize(meow_aes_128 Value)
 {
     meow_u128 R = veorq_u8(Value.A, Value.B);
     return(R);
@@ -166,10 +168,10 @@ Meow128_Zero()
     return(R);
 }
 
-static meow_state
+static meow_aes_128
 Meow128_ZeroState()
 {
-    meow_state R;
+    meow_aes_128 R;
     R.A = R.B = vdupq_n_u8(0);
     return(R);
 }
@@ -181,10 +183,10 @@ Meow128_Set64x2(meow_u64 Low64, meow_u64 High64)
    return(R);
 }
 
-static meow_state
+static meow_aes_128
 Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
 {
-   meow_state R;
+   meow_aes_128 R;
    R.A = Meow128_Set64x2(Low64, High64);
    R.B = Meow128_Zero();
    return(R);
@@ -202,7 +204,8 @@ Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
 #define MEOW_ANALYSIS_END
 #endif
 
-typedef meow_u128 meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *SourceInit);
+typedef meow_u128 meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *Source);
+typedef void meow_absorb_implementation(struct meow_hash_state *State, meow_u64 Len, void *Source);
 
 #define MEOW_HASH_INTRINSICS_H
 #endif
