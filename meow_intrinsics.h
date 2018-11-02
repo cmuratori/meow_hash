@@ -59,6 +59,7 @@
 //
 
 #define meow_u8 char unsigned
+#define meow_u16 short unsigned
 #define meow_u32 int unsigned
 #define meow_u64 long long unsigned
 
@@ -78,6 +79,7 @@
 #define Meow128_AESDEC_Mem(Prior, Xor) _mm_aesdec_si128((Prior), _mm_loadu_si128((meow_u128 *)(Xor)))
 #define Meow128_AESDEC_Finalize(A) (A)
 #define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
+#define Meow128_Set64x2_State(Low64, High64) Meow128_Set64x2(Low64, High64)
 
 // TODO(casey): Not sure if this should actually be Meow128_Zero(A) ((A) = _mm_setzero_si128()), maybe
 #define Meow128_Zero() _mm_setzero_si128()
@@ -133,11 +135,11 @@ Meow128_AreEqual(meow_u128 A, meow_u128 B)
 }
 
 static meow_state
-Meow128_AESDEC(meow_state Prior, meow_u128 XOr)
+Meow128_AESDEC(meow_state Prior, meow_u128 Xor)
 {
     meow_state R;
     R.A = vaesimcq_u8(vaesdq_u8(Prior.A, Prior.B));
-    R.B = XOr;
+    R.B = Xor;
     return(R);
 }
 
@@ -146,7 +148,7 @@ Meow128_AESDEC_Mem(meow_state Prior, void *Xor)
 {
     meow_state R;
     R.A = vaesimcq_u8(vaesdq_u8(Prior.A, Prior.B));
-    R.B = vld1q_u8((meow_u8*)XOrPtr);
+    R.B = vld1q_u8((meow_u8*)Xor);
     return(R);
 }
 
@@ -155,15 +157,6 @@ Meow128_AESDEC_Finalize(meow_state Value)
 {
     meow_u128 R = veorq_u8(Value.A, Value.B);
     return(R);
-}
-
-// NOTE(mmozeiko): do not use "B" member for return value!
-// Use this only as input to AESDEC operation
-static meow_u128
-Meow128_Set64x2(meow_u64 Low64, meow_u64 High64)
-{
-   meow_u128 R = vreinterpretq_u8_u64(vcombine_u64(vcreate_u64(Low64), vcreate_u64(High64)));
-   return(R);
 }
 
 static meow_u128
@@ -179,6 +172,22 @@ Meow128_ZeroState()
     meow_state R;
     R.A = R.B = vdupq_n_u8(0);
     return(R);
+}
+
+static meow_u128
+Meow128_Set64x2(meow_u64 Low64, meow_u64 High64)
+{
+   meow_u128 R = vreinterpretq_u8_u64(vcombine_u64(vcreate_u64(Low64), vcreate_u64(High64)));
+   return(R);
+}
+
+static meow_state
+Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
+{
+   meow_state R;
+   R.A = Meow128_Set64x2(Low64, High64);
+   R.B = Meow128_Zero();
+   return(R);
 }
 
 #endif
