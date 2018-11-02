@@ -7,6 +7,7 @@
    
    ======================================================================== */
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <memory.h>
@@ -31,7 +32,7 @@ struct test_file
 
 struct test_value
 {
-    meow_hash Hash;
+    meow_u128 Hash;
     test_value *Next;
     test_file *FirstFile;
 };
@@ -52,6 +53,7 @@ struct test_group
     meow_u64 FileCount;
     meow_u64 ByteCount;
     meow_u64 DuplicateFileCount;
+    meow_u64 ChangedFileCount;
     
     // NOTE(casey): Errors
     meow_u64 AccessFailureCount;
@@ -92,7 +94,7 @@ ReadEntireFile(test_group *Group, char *Filename)
         Result.Size = ftell(File);
         fseek(File, 0, SEEK_SET);
         
-        Result.Contents = aligned_alloc(MEOW_HASH_ALIGNMENT, Result.Size);
+        Result.Contents = aligned_alloc(CACHE_LINE_ALIGNMENT, Result.Size);
         if(Result.Contents)
         {
             if(Result.Size)
@@ -143,6 +145,7 @@ WriteReport(test_group *Group, int Completed)
         PrintSize(R, Group->ByteCount, false);
         fprintf(R, "\n");
         fprintf(R, "    Duplicate files: %0.0f\n", (double)Group->DuplicateFileCount);
+        fprintf(R, "    Files changed during search: %0.0f\n", (double)Group->ChangedFileCount);
         fprintf(R, "    Access failures: %0.0f\n", (double)Group->AccessFailureCount);
         fprintf(R, "    Allocation failures: %0.0f\n", (double)Group->AllocationFailureCount);
         fprintf(R, "    Read failures: %0.0f\n", (double)Group->ReadFailureCount);
@@ -210,10 +213,11 @@ IngestFile(test_group *Group, char *FileName)
         if(QuickStatus)
         {
             double Gigabyte = 1024.0*1024.0*1024.0;
-            printf("\r%0.0f files, %0.02fgb, %0.0f dupes",
+            printf("\r%0.0f files, %0.02fgb, %0.0f dupes, %0.0f chng",
                    (double)Group->FileCount,
                    (double)Group->ByteCount / (double)Gigabyte,
-                   (double)Group->DuplicateFileCount);
+                   (double)Group->DuplicateFileCount,
+                   (double)Group->ChangedFileCount);
         }
         
         if((Group->FileCount % 1000) == 0)
@@ -222,15 +226,16 @@ IngestFile(test_group *Group, char *FileName)
         }
         
         int DuplicateFileFound = 0;
+        int FileChanged = 0;
         for(int TestIndex = 0;
             TestIndex < Group->TestCount;
             ++TestIndex)
         {
             test *Test = Group->Tests + TestIndex;
             
-            meow_hash Hash = Test->Type.Imp(0, File.Size, File.Contents);
+            meow_u128 Hash = Test->Type.Imp(0, File.Size, File.Contents);
             
-            test_value **Slot = &Test->Table[Hash.u32[0] % ArrayCount(Test->Table)];
+            test_value **Slot = &Test->Table[MeowU32From(Hash) % ArrayCount(Test->Table)];
             test_value *Entry = *Slot;
             while(Entry && memcmp(&Entry->Hash, &Hash, sizeof(Hash)))
             {
@@ -245,17 +250,25 @@ IngestFile(test_group *Group, char *FileName)
                     Check = Check->Next)
                 {
                     entire_file OtherFile = ReadEntireFile(Group, Check->FileName);
-                    if(OtherFile.Contents &&
-                       ((File.Size != OtherFile.Size) ||
-                        memcmp(File.Contents, OtherFile.Contents, File.Size)))
+                    meow_u128 OtherHash = Test->Type.Imp(0, OtherFile.Size, OtherFile.Contents);
+                    if(MeowHashesAreEqual(Hash, OtherHash))
                     {
-                        Check->IsCollision = 1;
-                        IsCollision = 1;
-                        ++Test->CollisionCount;
+                        if(OtherFile.Contents &&
+                           ((File.Size != OtherFile.Size) ||
+                            memcmp(File.Contents, OtherFile.Contents, File.Size)))
+                        {
+                            Check->IsCollision = 1;
+                            IsCollision = 1;
+                            ++Test->CollisionCount;
+                        }
+                        else
+                        {
+                            DuplicateFileFound = 1;
+                        }
                     }
                     else
                     {
-                        DuplicateFileFound = 1;
+                        FileChanged = 1;
                     }
                     FreeEntireFile(&OtherFile);
                 }
@@ -287,6 +300,7 @@ IngestFile(test_group *Group, char *FileName)
         }
         
         Group->DuplicateFileCount += DuplicateFileFound;
+        Group->ChangedFileCount += FileChanged;
     }
     
     FreeEntireFile(&File);
@@ -296,6 +310,8 @@ static void IngestDirectoriesRecursively(test_group *Group, char *Path);
 int main(int ArgCount, char **Args)
 {
     int Result = -1;
+
+    InitializeHashesThatNeedInitializers();
     
     if(ArgCount == 3)
     {
@@ -410,7 +426,7 @@ DeallocPath(char *A)
 static void
 IngestDirectoriesRecursively(test_group *Group, char *Path)
 {
-    char *Wildcard = AllocPath(Path, "*");
+    char *Wildcard = AllocPath(Path, (char *)"*");
     
     WIN32_FIND_DATAA FindData;
     HANDLE SearchHandle = FindFirstFileExA(Wildcard, FindExInfoBasic, &FindData,
