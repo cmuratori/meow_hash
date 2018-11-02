@@ -19,6 +19,28 @@
 #include <stdint.h>
 #include "enable_arm_pmu/armpmu_lib.h"
 #define __rdtsc() read_pmu()
+#define __rdtscp(x) read_pmu()
+#endif
+
+#ifndef _WIN32
+static int unsigned
+_rotl(int unsigned Value, int Count)
+{
+    int unsigned Result = (Value << Count) | (Value >> (32 - Count));
+    return Result;
+}
+#endif
+
+#ifndef _MSC_VER
+
+#if __i386__
+#define __cpuid(Array, Value) __asm__ __volatile__("cpuid" : : : "eax", "ebx", "ecx", "edx")
+#elif __x86_64__
+#define __cpuid(Array, Value) __asm__ __volatile__("cpuid" : : : "rax", "rbx", "rcx", "rdx")
+#else
+#define __cpuid(Array, Value)
+#endif
+
 #endif
 
 #include "meow_test.h"
@@ -369,7 +391,9 @@ main(int ArgCount, char **Args)
     fprintf(stderr, "Versions compiled into this benchmark:\n");
     
     meow_u64 MaxClockCount = (meow_u64)10000000;
-    input_size_tests *Tests = (input_size_tests *)aligned_alloc(4, sizeof(input_size_tests));
+    // NOTE(mmozeiko): Test memory should be aligned to 16 because it contains member with SIMD type
+    // which means that compiler can potentially issue aligned store to this SIMD member
+    input_size_tests *Tests = (input_size_tests *)aligned_alloc(16, sizeof(input_size_tests));
     
     int unsigned TypeCount = ArrayCount(NamedHashTypes);
     for(int unsigned TypeIndex = 0;
