@@ -195,15 +195,16 @@ struct named_hash_type
     char *FullName;
     
     meow_hash_implementation *Imp;
+    meow_absorb_implementation *Absorb;
 };
 
 static named_hash_type NamedHashTypes[] =
 {
 #define MEOW_HASH_TEST_INDEX_128 0
-    {(char *)"Meow128", (char *)"Meow 128-bit AES-NI 128-wide", MeowHash1},
+    {(char *)"Meow128", (char *)"Meow 128-bit AES-NI 128-wide", MeowHash1, MeowHashAbsorb1},
 #if MEOW_HASH_AVX512
-    {(char *)"Meow128x2", (char *)"Meow 128-bit VAES 256-wide", MeowHash2},
-    {(char *)"Meow128x4", (char *)"Meow 128-bit VAES 512-wide", MeowHash4},
+    {(char *)"Meow128x2", (char *)"Meow 128-bit VAES 256-wide", MeowHash2, MeowHashAbsorb2},
+    {(char *)"Meow128x4", (char *)"Meow 128-bit VAES 512-wide", MeowHash4, MeowHashAbsorb4},
 #endif
 #if MEOW_INCLUDE_TRUNCATIONS
     {(char *)"Meow64", (char *)"Meow 64-bit AES-NI 128-wide", MeowHashTruncate64},
