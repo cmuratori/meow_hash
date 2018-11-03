@@ -17,7 +17,7 @@ popd
 :SkipMSVC
 
 
-where cl >nul 2>nul
+where clang++ >nul 2>nul
 IF %ERRORLEVEL% NEQ 0 (echo WARNING: clang++ is not in the path - please set up LLVM to do clang++ builds) && goto SkipCLANG
 
 echo -------------------
