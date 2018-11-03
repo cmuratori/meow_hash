@@ -11,47 +11,18 @@
 #include <stdlib.h>
 #include <memory.h>
 
-#if _WIN32
-// NOTE(casey): Sadly, Visual Studio STILL doesn't seem to support standard
-// C, so you have to use their weird aligned malloc.
-// NOTE(mmozeiko): gcc/clang on Windows also should use these functions
-#define aligned_alloc(a,b) _aligned_malloc(b,a)
-#define free _aligned_free
-#elif __APPLE__
-// NOTE: Apple Xcode/clang seems to not include aligned_alloc in the standard
-// library, so emulate via posix_memalign.
-static void* aligned_alloc(size_t alignment, size_t size)
-{
-    void* pointer = 0;
-    posix_memalign(&pointer, alignment, size);
-    return pointer;
-}
-#endif
-
 //
-// NOTE(casey): entire_file / ReadEntireFile / FreeEntireFile are simple helpers
-// for loading a file into memory.  They are defined at the end of this file.
+// NOTE(casey): Step 1 - include an intrinsics header, then include meow_hash.h
 //
-struct entire_file
-{
-    size_t Size;
-    void *Contents;
-};
-static entire_file ReadEntireFile(char *Filename);
-static void FreeEntireFile(entire_file *File);
-
-//
-// NOTE(casey): Step 1 - include your intrinsics header, the include meow_hash.h
+// Meow relies on definitions for non-standard types (meow_u128, etc.) and
+// intrinsics for various platforms. You can either include the supplied meow_intrinsics.h
+// file that will define these for you with its best guesses for your platform, or for
+// more control, you can define them all yourself to map to your own stuff.
 //
 
-// NOTE(casey): Meow relies on definitions for __m128/256/512, so you must
-// have those defined either in your own include files or via a standard .h:
-#if _MSC_VER
-#include <intrin.h>
-#else
-#include <x86intrin.h>
-#endif
-#include "meow_hash.h"
+#include "meow_intrinsics.h" // NOTE(casey): Platform prerequisites for the Meow hash code (replace with your own, if you want)
+
+#include "meow_hash.h" // NOTE(casey): The Meow hash code itself
 
 //
 // NOTE(casey): Step 2 (optional) - for future-proofing, detect which Meow hash the CPU can run
@@ -104,24 +75,37 @@ int MeowHashSpecializeForCPU(void)
 //   HashTestBuffer - how to have Meow hash a buffer of data
 //   HashOneFile - have Meow hash the contents of a file
 //   CompareTwoFiles - have Meow hash the contents of two files, and check for equivalence
+//
+
+//
+// NOTE(casey): entire_file / ReadEntireFile / FreeEntireFile are simple helpers
+// for loading a file into memory.  They are defined at the end of this file.
+//
+struct entire_file
+{
+    size_t Size;
+    void *Contents;
+};
+static entire_file ReadEntireFile(char *Filename);
+static void FreeEntireFile(entire_file *File);
 
 static void
-PrintHash(meow_hash Hash)
+PrintHash(meow_u128 Hash)
 {
+    meow_u32 *HashU32 = (meow_u32 *)&Hash;
     printf("    %08X-%08X-%08X-%08X\n",
-           Hash.u32[ 3],
-           Hash.u32[ 2],
-           Hash.u32[ 1],
-           Hash.u32[ 0]);
+           HashU32[3],
+           HashU32[2],
+           HashU32[1],
+           HashU32[0]);
 }
 
 static void
 HashTestBuffer(void)
 {
-    // NOTE(casey): Make a buffer with repeating numbers.  To ensure compatibility
-    // with older x64 chips, make sure to align the buffer!
+    // NOTE(casey): Make a buffer with repeating numbers.
     int Size = 16000;
-    char *Buffer = (char *)aligned_alloc(MEOW_HASH_ALIGNMENT, Size);
+    char *Buffer = (char *)malloc(Size);
     for(int Index = 0;
         Index < Size;
         ++Index)
@@ -130,12 +114,11 @@ HashTestBuffer(void)
     }
     
     // NOTE(casey): Ask Meow for the hash
-    meow_hash Hash = MeowHash(0, Size, Buffer);
+    meow_u128 Hash = MeowHash(0, Size, Buffer);
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
-    __m128i Hash128 = Hash.u128;
-    long long unsigned Hash64 = Hash.u64[0];
-    int unsigned Hash32 = Hash.u32[0];
+    long long unsigned Hash64 = MeowU64From(Hash);
+    int unsigned Hash32 = MeowU32From(Hash);
     
     // NOTE(casey): Print the hash
     printf("  Hash of a test buffer:\n");
@@ -152,7 +135,7 @@ HashOneFile(char *FilenameA)
     if(A.Contents)
     {
         // NOTE(casey): Ask Meow for the hash
-        meow_hash HashA = MeowHash(0, A.Size, A.Contents);
+        meow_u128 HashA = MeowHash(0, A.Size, A.Contents);
         
         // NOTE(casey): Print the hash
         printf("  Hash of \"%s\":\n", FilenameA);
@@ -171,8 +154,8 @@ CompareTwoFiles(char *FilenameA, char *FilenameB)
     if(A.Contents && B.Contents)
     {
         // NOTE(casey): Hash both files
-        meow_hash HashA = MeowHash(0, A.Size, A.Contents);
-        meow_hash HashB = MeowHash(0, B.Size, B.Contents);
+        meow_u128 HashA = MeowHash(0, A.Size, A.Contents);
+        meow_u128 HashB = MeowHash(0, B.Size, B.Contents);
         
         // NOTE(casey): Check for match
         int HashesMatch = MeowHashesAreEqual(HashA, HashB);
@@ -266,8 +249,7 @@ ReadEntireFile(char *Filename)
         Result.Size = ftell(File);
         fseek(File, 0, SEEK_SET);
 
-        // NOTE(casey): To ensure compatibility with older x64 chips, make sure to align the buffer!
-        Result.Contents = aligned_alloc(MEOW_HASH_ALIGNMENT, Result.Size);
+        Result.Contents = malloc(Result.Size);
         if(Result.Contents)
         {
             if(Result.Size)

@@ -7,12 +7,7 @@
    
    ======================================================================== */
 
-#if _MSC_VER
-#include <intrin.h>
-#else
-#include <x86intrin.h>
-#endif
-
+#include "meow_intrinsics.h"
 #include "meow_hash.h"
 
 //
@@ -22,23 +17,23 @@
 void
 Meow1_32(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash1(seed, len, (void *)key);
-    *(meow_u32 *)out = Result.u32[0];
+    meow_u128 Result = MeowHash1(seed, len, (void *)key);
+    *(meow_u32 *)out = *(meow_u32 *)&Result;
 }
 
 void
 Meow1_64(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash1(seed, len, (void *)key);
-    ((meow_u64 *)out)[0] = Result.u64[0];
+    meow_u128 Result = MeowHash1(seed, len, (void *)key);
+    ((meow_u64 *)out)[0] = ((meow_u64 *)&Result)[0];
 }
 
 void
 Meow1_128(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash1(seed, len, (void *)key);
-    ((meow_u64 *)out)[0] = Result.u64[0];
-    ((meow_u64 *)out)[1] = Result.u64[1];
+    meow_u128 Result = MeowHash1(seed, len, (void *)key);
+    ((meow_u64 *)out)[0] = ((meow_u64 *)&Result)[0];
+    ((meow_u64 *)out)[1] = ((meow_u64 *)&Result)[1];
 }
 
 #if MEOW_HASH_AVX512
@@ -50,21 +45,21 @@ Meow1_128(const void * key, int len, meow_u32 seed, void * out)
 void
 Meow2_32(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash2(seed, len, (void *)key);
+    meow_u128 Result = MeowHash2(seed, len, (void *)key);
     *(meow_u32 *)out = Result.u32[0];
 }
 
 void
 Meow2_64(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash2(seed, len, (void *)key);
+    meow_u128 Result = MeowHash2(seed, len, (void *)key);
     ((meow_u64 *)out)[0] = Result.u64[0];
 }
 
 void
 Meow2_128(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash2(seed, len, (void *)key);
+    meow_u128 Result = MeowHash2(seed, len, (void *)key);
     ((meow_u64 *)out)[0] = Result.u64[0];
     ((meow_u64 *)out)[1] = Result.u64[1];
 }
@@ -76,21 +71,21 @@ Meow2_128(const void * key, int len, meow_u32 seed, void * out)
 void
 Meow4_32(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash4(seed, len, (void *)key);
+    meow_u128 Result = MeowHash4(seed, len, (void *)key);
     *(meow_u32 *)out = Result.u32[0];
 }
 
 void
 Meow4_64(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash4(seed, len, (void *)key);
+    meow_u128 Result = MeowHash4(seed, len, (void *)key);
     ((meow_u64 *)out)[0] = Result.u64[0];
 }
 
 void
 Meow4_128(const void * key, int len, meow_u32 seed, void * out)
 {
-    meow_hash Result = MeowHash4(seed, len, (void *)key);
+    meow_u128 Result = MeowHash4(seed, len, (void *)key);
     ((meow_u64 *)out)[0] = Result.u64[0];
     ((meow_u64 *)out)[1] = Result.u64[1];
 }

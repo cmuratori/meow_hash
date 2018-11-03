@@ -7,12 +7,17 @@
    
    ======================================================================== */
 
+#include "meow_intrinsics.h" // NOTE(casey): Platform prerequisites for the Meow hash code (replace with your own, if you want)
+
+// NOTE(casey): When we're doing benchmarking, we look for optimal speeds by aligning
+// to the Xeon "double cache line alignment", just to make sure all hashes have the
+// best chance at performing well.
+#define CACHE_LINE_ALIGNMENT 128
+
 #if _MSC_VER
-#include <intrin.h>
 #define TRY __try
 #define CATCH __except(1)
 #else
-#include <x86intrin.h>
 #define TRY try
 #define CATCH catch(...)
 #endif
@@ -39,19 +44,19 @@ static void* aligned_alloc(size_t alignment, size_t size)
 
 #define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
 
-static meow_hash
+static meow_u128
 MeowHashTruncate64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = MeowHash1(Seed, Len, Source);
-    Result.u64[1] = 0;
+    meow_u128 Result = MeowHash1(Seed, Len, Source);
+    ((meow_u64 *)&Result)[1] = 0;
     return(Result);
 }
 
-static meow_hash
+static meow_u128
 MeowHashTruncate32(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = MeowHashTruncate64(Seed, Len, Source);
-    Result.u32[1] = 0;
+    meow_u128 Result = MeowHashTruncate64(Seed, Len, Source);
+    ((meow_u32 *)&Result)[1] = 0;
     return(Result);
 }
 
@@ -66,70 +71,115 @@ MeowHashTruncate32(meow_u64 Seed, meow_u64 Len, void *Source)
 
 #if MEOW_INCLUDE_OTHER_HASHES
 
-#if !defined(_MSC_VER) || (_MSC_FULL_VER >= 191025017)
-#define MEOW_T1HA_INCLUDED 1
-#else
-#define MEOW_T1HA_INCLUDED 0
-#endif
-
-#include "other/city.h"
-#include "other/city.cc"
-static meow_hash
-CityHash128(meow_u64 Seed, meow_u64 Len, void *Source)
-{
-    meow_hash Result = {};
-    
-    uint128 Temp = CityHash128((char *)Source, Len);
-    Result.u64[0] = Temp.first;
-    Result.u64[1] = Temp.second;
-    
-    return(Result);
-}
-
 #include "other/falkhash.c"
-static meow_hash
+static meow_u128
 FalkHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
-    Result.u128 = falkhash(Source, Len, Seed);
+    Result = falkhash(Source, Len, Seed);
     
     return(Result);
 }
 
 #include "other/metrohash128.h"
 #include "other/metrohash128.cpp"
-static meow_hash
+static meow_u128
 MetroHash128(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
     MetroHash128::Hash((uint8_t *)Source, Len, (uint8_t *)&Result, Seed);
     
     return(Result);
 }
 
-#if MEOW_T1HA_INCLUDED
 #include "other/t1ha0_ia32aes_avx.c"
-static meow_hash
+static meow_u128
 t1ha64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
-    Result.u64[0] = t1ha0_ia32aes_avx(Source, Len, Seed);
+    *(meow_u64 *)&Result = t1ha0_ia32aes_avx(Source, Len, Seed);
     
     return(Result);
 }
-#endif
 
 #include "other/xxhash.c"
-static meow_hash
+static meow_u128
 xxHash64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_hash Result = {};
+    meow_u128 Result = {};
     
-    Result.u64[0] = XXH64(Source, Len, Seed);
+    *(meow_u64 *)&Result = XXH64(Source, Len, Seed);
     
+    return(Result);
+}
+
+#include "other/clhash.c"
+static void *CLHashJunk;
+static meow_u128
+CLHash64(meow_u64 Seed, meow_u64 Len, void *Source)
+{
+    meow_u128 Result = {};
+    
+    // NOTE(casey): We cheat here and allow CLHash to re-use its "junk", even though this
+    // is technically illegal because the benchmark expects you to take a seed.  Everyone
+    // else just handles that, whereas CLHash has a tremendous overhead cost for changing
+    // the seed.
+    *(meow_u64 *)&Result = clhash(CLHashJunk, (char *)Source, Len);
+    
+    return(Result);
+}
+
+#include "other/highwayhash.h"
+#include "other/highwayhash.c"
+union highway_result
+{
+    meow_u128 Meow;
+    uint64_t Hash[2];
+};
+static meow_u128
+HighwayHash128(meow_u64 Seed, meow_u64 Len, void *Source)
+{
+    highway_result Result;
+    
+    uint64_t Key[4] = {Seed, Seed, Seed, Seed};
+    HighwayHash128((uint8_t *)Source, Len, Key, Result.Hash);
+    
+    return(Result.Meow);
+}
+
+#include "other/city.h"
+#include "other/city.cc"
+static meow_u128
+CityHash128(meow_u64 Seed, meow_u64 Len, void *Source)
+{
+    meow_u128 Result = {};
+    
+    *(uint128 *)&Result = CityHash128((char *)Source, Len);
+    
+    return(Result);
+}
+
+#define FARMHASH_NO_BUILTIN_EXPECT // NOTE(casey): It appears Farm Hash doesn't support __assume, only __builtin_expect, I guess?
+#include "other/farmhash.cc"
+static meow_u128
+FarmHash128(meow_u64 Seed, meow_u64 Len, void *Source)
+{
+    meow_u128 Result;
+    
+    /* NOTE(casey): I know it LOOKS like this is calling CityHash, but it's not - Farm's 128-bit hash is defined like this:
+    
+       return DebugTweak(farmhashcc::CityHash128WithSeed(s, len, seed));
+       
+       And then inside their CityHash128WithSeed, they call Murmur on small values, etc.  So this just goes more directly
+       to the source (hopefully - oh my god Farm Hash's code is giant)
+    */
+    
+    util::uint128_t R = util::farmhashcc::CityHash128WithSeed((const char *)Source, (size_t)Len, util::Uint128(Seed, Seed));
+    
+    Result = Meow128_Set64x2(R.first, R.second);
     return(Result);
 }
 
@@ -145,36 +195,42 @@ struct named_hash_type
     char *FullName;
     
     meow_hash_implementation *Imp;
-    meow_macroblock_op *Op;
+    meow_absorb_implementation *Absorb;
 };
 
 static named_hash_type NamedHashTypes[] =
 {
 #define MEOW_HASH_TEST_INDEX_128 0
-    {(char *)"Meow128", (char *)"Meow 128-bit AES-NI 128-wide", MeowHash1, MeowHash1Op},
+    {(char *)"Meow128", (char *)"Meow 128-bit AES-NI 128-wide", MeowHash1, MeowHashAbsorb1},
 #if MEOW_HASH_AVX512
-    {(char *)"Meow128x2", (char *)"Meow 128-bit VAES 256-wide", MeowHash2, MeowHash2Op},
-    {(char *)"Meow128x4", (char *)"Meow 128-bit VAES 512-wide", MeowHash4, MeowHash4Op},
+    {(char *)"Meow128x2", (char *)"Meow 128-bit VAES 256-wide", MeowHash2, MeowHashAbsorb2},
+    {(char *)"Meow128x4", (char *)"Meow 128-bit VAES 512-wide", MeowHash4, MeowHashAbsorb4},
 #endif
 #if MEOW_INCLUDE_TRUNCATIONS
     {(char *)"Meow64", (char *)"Meow 64-bit AES-NI 128-wide", MeowHashTruncate64},
     {(char *)"Meow32", (char *)"Meow 32-bit AES-NI 128-wide", MeowHashTruncate32},
 #endif
-    
+
 #if MEOW_INCLUDE_OTHER_HASHES
-#if MEOW_T1HA_INCLUDED
     {(char *)"t1ha64", (char *)"t1ha 64-bit", t1ha64},
-#endif
     {(char *)"Falk128", (char *)"Falk Hash 128-bit", FalkHash128},
     {(char *)"xx64", (char *)"xxHash 64-bit", xxHash64},
     {(char *)"Met128", (char *)"Metro Hash 128-bit", MetroHash128},
     {(char *)"City128", (char *)"City Hash 128-bit", CityHash128},
+    {(char *)"Farm", (char *)"Farm Hash 128-bit", FarmHash128},
+    {(char *)"CL", (char *)"CLHash 64-bit", CLHash64},
+    
+    // NOTE(casey): Highway Hash is disabled until someone provides a usable ~4 file implementation
+    // that is optimized.
+//    {(char *)"High128", (char *)"Highway Hash 128-bit", HighwayHash128},
 #endif
 };
 
 static void
 PrintSize(FILE *Stream, double Size, int Fixed)
 {
+    int Decimals = 0;
+    
     char *Suffix = Fixed ? (char *)"b " : (char *)"b";
     if(Size >= 1024.0)
     {
@@ -182,6 +238,8 @@ PrintSize(FILE *Stream, double Size, int Fixed)
         Size /= 1024.0;
         if(Size >= 1024.0)
         {
+            Decimals = 1;
+            
             Suffix = (char *)"mb";
             Size /= 1024.0;
             if(Size >= 1024.0)
@@ -191,12 +249,28 @@ PrintSize(FILE *Stream, double Size, int Fixed)
             }
         }
     }
-    
-    fprintf(Stream, Fixed ? "%4.0f%s" : "%0.0f%s", Size, Suffix);
+  
+    if(Decimals)
+    {
+        fprintf(Stream, Fixed ? "%6.2f%s" : "%0.2f%s", Size, Suffix);
+    }
+    else
+    {
+        fprintf(Stream, Fixed ? "%6.0f%s" : "%0.0f%s", Size, Suffix);
+    }
 }
 
 static void
-PrintHash(FILE *Stream, meow_hash Hash)
+PrintHash(FILE *Stream, meow_u128 Hash)
 {
-    fprintf(Stream, "%08X-%08X-%08X-%08X", Hash.u32[3], Hash.u32[2], Hash.u32[1], Hash.u32[0]);
+    meow_u32 *HashU32 = (meow_u32 *)&Hash;
+    fprintf(Stream, "%08X-%08X-%08X-%08X", HashU32[3], HashU32[2], HashU32[1], HashU32[0]);
+}
+
+static void
+InitializeHashesThatNeedInitializers(void)
+{
+#if MEOW_INCLUDE_OTHER_HASHES
+    CLHashJunk = get_random_key_for_clhash(1234, 5678);
+#endif
 }
