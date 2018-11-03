@@ -812,7 +812,8 @@ MeowHashEnd(meow_hash_state *State, meow_u64 Seed)
             case 1: Hi |= (meow_u64)(*(Source + Has8 + Has4))     << 32;
             case 0:;
         }
-        SF = Meow128_AESDEC(Meow128_Set64x2(Hi, Lo), SF);
+        meow_aes_128 PartialState = Meow128_Set64x2_State(Hi, Lo);
+        SF = Meow128_AESDEC(PartialState, Meow128_AESDEC_Finalize(SF));
     }
     
     meow_u128 Mixer = Meow128_Set64x2(Seed - State->TotalLengthInBytes,
