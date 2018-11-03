@@ -1,7 +1,7 @@
 @echo off
 
 where cl >nul 2>nul
-IF %ERRORLEVEL% NEQ 0 goto SkipMSVC
+IF %ERRORLEVEL% NEQ 0 (echo WARNING: cl is not in the path - please set up Visual Studio to do cl builds) && goto SkipMSVC
 
 echo -------------------
 echo Building with MSVC
@@ -18,7 +18,7 @@ popd
 
 
 where cl >nul 2>nul
-IF %ERRORLEVEL% NEQ 0 goto SkipCLANG
+IF %ERRORLEVEL% NEQ 0 (echo WARNING: clang++ is not in the path - please set up LLVM to do clang++ builds) && goto SkipCLANG
 
 echo -------------------
 echo Building with CLANG
@@ -33,4 +33,4 @@ popd
 
 echo -------------------
 
-:SlipCLANG
+:SkipCLANG
