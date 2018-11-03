@@ -1,0 +1,156 @@
+language: shell
+install: true
+
+matrix:
+  include:
+
+  - name: "MSVC on Windows"
+    os: windows
+    # MSVC is already installed on Travis, keep it here just in case we need to use it later
+    #install:
+    #- choco install visualstudio2017-workload-vctools -y --package-parameters "--no-includeRecommended --add Microsoft.VisualStudio.Component.VC.x86.amd64 --add Microsoft.VisualStudio.Component.Windows10SDK"
+    script:
+    # test if meow_hash.h compiles as C
+    - touch test.c
+    - cmd.exe /C '"C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" amd64 && cl.exe /c /FImeow_intrinsics.h /FImeow_hash.h test.c'
+    # build & test
+    - cmd.exe /C '"C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" amd64 && build.bat'
+    - build_msvc/meow_test.exe
+    - build_msvc/meow_example.exe
+
+  - name: "clang on Windows"
+    os: windows
+    env:
+    - CC="/c/Program Files/LLVM/bin/clang"
+    - CXX="/c/Program Files/LLVM/bin/clang++"
+    install:
+    # MSVC is already installed on Travis, keep it here just in case we need to use it later
+    #- choco install visualstudio2017-workload-vctools -y --package-parameters "--no-includeRecommended --add Microsoft.VisualStudio.Component.VC.x86.amd64 --add Microsoft.VisualStudio.Component.Windows10SDK"
+    - choco upgrade llvm -y
+    - |-
+      "${CC}" --version
+    script:
+    # test if meow_hash.h compiles as C
+    - touch test.c
+    - |-
+      "${CC}" -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    # build & test
+    - cmd.exe /C build.bat
+    - build_clang/meow_test.exe
+    - build_clang/meow_example.exe
+
+  - name: "gcc on Windows"
+    os: windows
+    env:
+    - CC="/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin/x86_64-w64-mingw32-gcc"
+    - CXX="/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin/x86_64-w64-mingw32-g++"
+    install:
+    - choco upgrade mingw -y
+    - ${CC} --version
+    script:
+    # test if meow_hash.h compiles as C
+    - touch test.c
+    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    # build & test
+    - ./build.sh
+    - build/meow_test.exe
+    - build/meow_example.exe
+
+  - name: "clang on Linux"
+    os: linux
+    dist: trusty
+    sudo: false
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        - llvm-toolchain-trusty-7
+        packages:
+        - clang-7
+    env:
+    - CC=clang-7
+    - CXX=clang++-7
+    install:
+    - ${CC} --version
+    script:
+    # test if meow_hash.h compiles as C
+    - touch test.c
+    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    # build & test
+    - ./build.sh
+    - ./build/meow_test
+    - ./build/meow_example
+
+  - name: "gcc on Linux"
+    os: linux
+    dist: trusty
+    sudo: false
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-8
+    env:
+    - CC=gcc-8
+    - CXX=g++-8
+    install:
+    - ${CC} --version
+    script:
+    # test if meow_hash.h compiles as C
+    - touch test.c
+    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    # build & test
+    - ./build.sh
+    - ./build/meow_test
+    - ./build/meow_example
+
+  - name: "clang on Linux (ARMv8)"
+    os: linux
+    dist: trusty
+    sudo: false
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        - llvm-toolchain-trusty-7
+        packages:
+        - clang-7
+        - lld-7
+        - libc6-dev-arm64-cross
+        - libgcc-4.8-dev-arm64-cross
+        - libstdc++-4.8-dev-arm64-cross
+    env:
+    - CC=clang-7
+    - CXX=clang++-7
+    install:
+    # use custom qemu verion because Ubuntu 14.04 has old qemu-user-static version
+    # which does not know how to emulate AES crypto opcodes on ARMv8
+    - wget -q http://rsync.alpinelinux.org/alpine/edge/main/x86_64/qemu-aarch64-2.12.1-r1.apk
+    - tar -xzf qemu-aarch64-2.12.1-r1.apk --warning=none --strip-components=2 usr/bin/qemu-aarch64
+    - ${CC} --version
+    script:
+    # test if meow_hash.h compiles as C
+    - touch test.c
+    - ${CC} --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -mcpu=cortex-a53 -c -include meow_intrinsics.h -include meow_hash.h test.c
+    # build
+    - ${CXX} -O3 -fuse-ld=lld-7 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu -mcpu=cortex-a53 meow_example.cpp -o meow_example
+    # test with qemu
+    - ./qemu-aarch64 -L /usr/aarch64-linux-gnu ./meow_example
+
+  - name: "clang on macOS"
+    os: osx
+    osx_image: xcode10.1
+    env:
+    - CC=clang
+    - CXX=clang++
+    install:
+    - ${CC} --version
+    script:
+    # test if meow_hash.h compiles as C
+    - touch test.c
+    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    # build & test
+    - ./build.sh
+    - ./build/meow_test
+    - ./build/meow_example
