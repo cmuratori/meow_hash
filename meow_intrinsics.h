@@ -204,6 +204,7 @@ Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
 #define MEOW_ANALYSIS_END
 #endif
 
+struct meow_hash_state;
 typedef meow_u128 meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *Source);
 typedef void meow_absorb_implementation(struct meow_hash_state *State, meow_u64 Len, void *Source);
 

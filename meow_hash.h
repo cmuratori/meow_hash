@@ -553,7 +553,7 @@ MeowHash4(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
 // NOTE(casey): Streaming construction (optional)
 //
 
-struct meow_hash_state
+typedef struct meow_hash_state
 {
     union
     {
@@ -604,7 +604,7 @@ struct meow_hash_state
     
     meow_u8 Buffer[1 << MEOW_HASH_BLOCK_SIZE_SHIFT];
     int unsigned BufferLen;
-};
+} meow_hash_state;
 
 static void
 MeowHashBegin(meow_hash_state *State)
