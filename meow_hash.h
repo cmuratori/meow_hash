@@ -57,33 +57,28 @@
    
    A: CASEY MURATORI (https://caseymuratori.com) wrote the original
       implementation for use in processing large-footprint assets for
-      the game 1935 (https://molly1935.com).  The original system used
-      an SHA-1 hash (which is not designed for speed), and so to eliminate
-      hashing bottlenecks in the pipeline, the Meow hash was designed to
-      produce equivalent quality hash values as a drop-in replacement that
-      would take a fraction of the CPU time.
+      the game 1935 (https://molly1935.com).
       
       After the initial version, the hash was refined via collaboration
       with several great programmers who contributed suggestions and
       modifications:
       
-      WON CHUN (https://twitter.com/won3d) did extensive analysis of the
-      hash construction and helped improve the robustness and performance
-      of the core function.
+      WON CHUN (https://twitter.com/won3d) provided the much-improved
+      end-of-buffer handling, which significantly improved Meow's
+      performance on small unaligned hashes.
       
-      MARTINS MOZEIKO (https://matrins.ninja) provided the implementation
-      for ARM and the proper preprocessor gyrations to get the Meow hash
-      compiling cleanly on a variety of compiler configurations.
+      MARTINS MOZEIKO (https://matrins.ninja) ported Meow to ARM
+      and added the proper preprocessor dressing for clean compilation
+      on a variety of compiler configurations.
       
-      FABIAN GIESEN (https://fgiesen.wordpress.com) provided a lot of
-      support for getting the benchmarking working properly across a
-      number of platforms.
+      FABIAN GIESEN (https://fgiesen.wordpress.com) provided support
+      for getting the benchmarking working properly across a number
+      of platforms.
       
       ARAS PRANCKEVICIUS (https://aras-p.info) provided the allocation
       shim for compilation on Mac OS X.
       
    ========================================================================
-   
    
    USAGE
    
@@ -817,8 +812,7 @@ MeowHashEnd(meow_hash_state *State, meow_u64 Seed)
             case 1: Hi |= (meow_u64)(*(Source + Has8 + Has4))     << 32;
             case 0:;
         }
-        meow_aes_128 PartialState = Meow128_Set64x2_State(Hi, Lo);
-        SF = Meow128_AESDEC(PartialState, Meow128_AESDEC_Finalize(SF));
+        SF = Meow128_AESDEC(Meow128_Set64x2(Hi, Lo), SF);
     }
     
     meow_u128 Mixer = Meow128_Set64x2(Seed - State->TotalLengthInBytes,
