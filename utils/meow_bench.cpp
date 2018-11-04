@@ -408,7 +408,7 @@ main(int ArgCount, char **Args)
         SizeIndex < ArrayCount(Tests->Sizes);
         ++SizeIndex)
     {
-        Tests->Sizes[SizeIndex].Clocks = (meow_u64 *)aligned_alloc(4, MaxClockCount*sizeof(meow_u64));
+        Tests->Sizes[SizeIndex].Clocks = (meow_u64 *)aligned_alloc(8, MaxClockCount*sizeof(meow_u64));
     }
     
     fprintf(stderr, "\n");
