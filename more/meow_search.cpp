@@ -30,7 +30,7 @@ struct test_file
 
 struct test_value
 {
-    meow_u128 Hash;
+    meow_hash Hash;
     test_value *Next;
     test_file *FirstFile;
 };
@@ -231,7 +231,7 @@ IngestFile(test_group *Group, char *FileName)
         {
             test *Test = Group->Tests + TestIndex;
             
-            meow_u128 Hash = Test->Type.Imp(0, File.Size, File.Contents);
+            meow_hash Hash = Test->Type.Imp(0, File.Size, File.Contents);
             
             test_value **Slot = &Test->Table[MeowU32From(Hash) % ArrayCount(Test->Table)];
             test_value *Entry = *Slot;
@@ -248,7 +248,7 @@ IngestFile(test_group *Group, char *FileName)
                     Check = Check->Next)
                 {
                     entire_file OtherFile = ReadEntireFile(Group, Check->FileName);
-                    meow_u128 OtherHash = Test->Type.Imp(0, OtherFile.Size, OtherFile.Contents);
+                    meow_hash OtherHash = Test->Type.Imp(0, OtherFile.Size, OtherFile.Contents);
                     if(MeowHashesAreEqual(Hash, OtherHash))
                     {
                         if(OtherFile.Contents &&

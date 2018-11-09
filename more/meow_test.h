@@ -45,18 +45,18 @@ static void* aligned_alloc(size_t alignment, size_t size)
 
 #define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
 
-static meow_u128
+static meow_hash
 MeowHashTruncate64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_u128 Result = MeowHash_Accelerated(Seed, Len, Source);
+    meow_hash Result = MeowHash_Accelerated(Seed, Len, Source);
     ((meow_u64 *)&Result)[1] = 0;
     return(Result);
 }
 
-static meow_u128
+static meow_hash
 MeowHashTruncate32(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_u128 Result = MeowHashTruncate64(Seed, Len, Source);
+    meow_hash Result = MeowHashTruncate64(Seed, Len, Source);
     ((meow_u32 *)&Result)[1] = 0;
     return(Result);
 }
@@ -203,6 +203,9 @@ static named_hash_type NamedHashTypes[] =
 {
 #define MEOW_HASH_TEST_INDEX_128 0
     {(char *)"Meow128", (char *)"Meow 128-bit AES-NI 128-wide", MeowHash_Accelerated, MeowHashAbsorb},
+#if MEOW_INCLUDE_C
+    {(char *)"MeowC", (char *)"Meow 128-bit ANSI-C", MeowHash_C},
+#endif
 #if MEOW_INCLUDE_TRUNCATIONS
     {(char *)"Meow64", (char *)"Meow 64-bit AES-NI 128-wide", MeowHashTruncate64},
     {(char *)"Meow32", (char *)"Meow 32-bit AES-NI 128-wide", MeowHashTruncate32},
@@ -231,12 +234,12 @@ PrintSize(FILE *Stream, double Size, int Fixed)
     char *Suffix = Fixed ? (char *)"b " : (char *)"b";
     if(Size >= 1024.0)
     {
+        Decimals = 1;
+        
         Suffix = (char *)"kb";
         Size /= 1024.0;
         if(Size >= 1024.0)
         {
-            Decimals = 1;
-            
             Suffix = (char *)"mb";
             Size /= 1024.0;
             if(Size >= 1024.0)
@@ -258,7 +261,7 @@ PrintSize(FILE *Stream, double Size, int Fixed)
 }
 
 static void
-PrintHash(FILE *Stream, meow_u128 Hash)
+PrintHash(FILE *Stream, meow_hash Hash)
 {
     meow_u32 *HashU32 = (meow_u32 *)&Hash;
     fprintf(Stream, "%08X-%08X-%08X-%08X", HashU32[3], HashU32[2], HashU32[1], HashU32[0]);

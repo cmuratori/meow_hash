@@ -70,7 +70,7 @@ struct input_size_test
     
     // NOTE(casey): We use a fake result target for writing in hopes of convincing the optimizer
     // that the computed hashes are actually used, and so won't be optimized out.
-    meow_u128 FakeSlot;
+    meow_hash FakeSlot;
     
     meow_u64 Size;
 };
@@ -82,6 +82,7 @@ struct input_size_tests
 {
     meow_u64 MaxClockCount;
     meow_u64 RunsPerHashImplementation;
+    int unsigned ClocksPerAvg;
     input_size_test Sizes[SIZE_COUNT_PER_BATCH];
 
     int unsigned ResultCount;
@@ -191,28 +192,31 @@ InitializeTests(input_size_tests *Tests, int unsigned SizeType, meow_u64 MaxCloc
     meow_u64 Start = 1;
     meow_u64 End = 1024;
     meow_u64 Divisor = 1;
+    int unsigned ClocksPerAvg = 100;
     if(SizeType < 24)
     {
         // NOTE(casey): 1b - 1024b
         NameBase = (char *)"Tiny Input";
+        Divisor = 2;
         
-        Start = 1;
+        Start = 0;
         End = 1024;
     }
-    else if(SizeType < 44)
+    else if(SizeType < 32)
     {
         // NOTE(casey): 1k - 64k
         NameBase = (char *)"Small Input";
-        Divisor = 2;
+        Divisor = 50;
         
         Start = Kb(1);
         End = Kb(64);
     }
-    else if(SizeType < 58)
+    else if(SizeType < 54)
     {
         // NOTE(casey): 64k - 1mb
         NameBase = (char *)"Medium Input";
-        Divisor = 10;
+        Divisor = 1000;
+        ClocksPerAvg = 10;
         
         Start = Kb(64);
         End = Mb(1);
@@ -221,7 +225,8 @@ InitializeTests(input_size_tests *Tests, int unsigned SizeType, meow_u64 MaxCloc
     {
         // NOTE(casey): 1mb - 512mb
         NameBase = (char *)"Large Input";
-        Divisor = 100;
+        Divisor = 100000;
+        ClocksPerAvg = 5;
         
         Start = Mb(1);
         End = Mb(512);
@@ -230,7 +235,8 @@ InitializeTests(input_size_tests *Tests, int unsigned SizeType, meow_u64 MaxCloc
     {
         // NOTE(casey): 512mb - 2gb
         NameBase = (char *)"Giant Input";
-        Divisor = 1000;
+        Divisor = 1000000;
+        ClocksPerAvg = 1;
         
         Start = Mb(512);
         End = MAX_SIZE_TO_TEST;
@@ -245,6 +251,7 @@ InitializeTests(input_size_tests *Tests, int unsigned SizeType, meow_u64 MaxCloc
     }
     
     sprintf(Tests->Name, "[%u / %u] %s", SizeType + 1, SIZE_TYPE_COUNT, NameBase);
+    Tests->ClocksPerAvg = ClocksPerAvg;
     Tests->MaxClockCount = (MaxClockCount / Divisor);
     Tests->RunsPerHashImplementation = (ArrayCount(Tests->Sizes) * Tests->MaxClockCount);
 }
@@ -263,7 +270,7 @@ PrintLeaderboard(input_size_tests *Tests, FILE *Stream)
         
         meow_u64 CurSize = BestResults->Size;
         meow_u64 ExpClocks = BestResults->ExpClocks;
-        meow_u64 MaxClocks = ExpClocks + (ExpClocks/ 100);
+        meow_u64 MaxClocks = ExpClocks; // + (ExpClocks/ 100);
         
         fprintf(Stream, "    ");
         PrintSize(Stream, BestResults->Size, true);
@@ -418,7 +425,7 @@ main(int ArgCount, char **Args)
                                 Test->ClockMin = Clocks;
                             }
                             
-                            int ClocksPerAvg = 1000;
+                            int ClocksPerAvg = Tests->ClocksPerAvg;
                             if(Test->ClockCount == ClocksPerAvg)
                             {
                                 meow_u64 ExpClocks = Test->ClockAccum / Test->ClockCount;

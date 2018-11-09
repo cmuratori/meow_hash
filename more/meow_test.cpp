@@ -11,6 +11,14 @@
 #include <stdlib.h>
 #include <memory.h>
 
+#undef MEOW_INCLUDE_C
+#undef MEOW_INCLUDE_TRUNCATIONS
+#undef MEOW_INCLUDE_OTHER_HASHES
+
+#define MEOW_INCLUDE_C 1
+#define MEOW_INCLUDE_TRUNCATIONS 0
+#define MEOW_INCLUDE_OTHER_HASHES 0
+
 #include "meow_test.h"
 
 //
@@ -54,53 +62,54 @@ main(int ArgCount, char **Args)
         ++TypeIndex)
     {
         named_hash_type *Type = NamedHashTypes + TypeIndex;
-        if(Type->Absorb)
+
+        int TotalPossible = 0;
+        int ImpError = 0;
+        int StreamError = 0;
+        int Unsupported = 0;
+        int MaxBufferSize = 2048;
+        
+        for(int BufferSize = 1;
+            BufferSize <= MaxBufferSize;
+            ++BufferSize)
         {
-            int TotalPossible = 0;
-            int ImpError = 0;
-            int StreamError = 0;
-            int Unsupported = 0;
-            int MaxBufferSize = 2048;
+            int AllocationSize = BufferSize + 2*CACHE_LINE_ALIGNMENT;
+            meow_u8 *Allocation = (meow_u8 *)aligned_alloc(CACHE_LINE_ALIGNMENT, AllocationSize);
+            memset(Allocation, 0, AllocationSize);
             
-            for(int BufferSize = 1;
-                BufferSize <= MaxBufferSize;
-                ++BufferSize)
+            meow_u8 *Buffer = Allocation + CACHE_LINE_ALIGNMENT;
+            for(int Guard = 0;
+                Guard < 1;
+                ++Guard)
             {
-                int AllocationSize = BufferSize + 2*CACHE_LINE_ALIGNMENT;
-                meow_u8 *Allocation = (meow_u8 *)aligned_alloc(CACHE_LINE_ALIGNMENT, AllocationSize);
-                memset(Allocation, 0, AllocationSize);
-                
-                meow_u8 *Buffer = Allocation + CACHE_LINE_ALIGNMENT;
-                for(int Guard = 0;
-                    Guard < 1;
-                    ++Guard)
+                for(int Flip = 0;
+                    Flip < BufferSize;
+                    ++Flip)
                 {
-                    for(int Flip = 0;
-                        Flip < BufferSize;
-                        ++Flip)
+                    meow_u64 Seed = 0;
+                    
+                    meow_u8 *FlipByte = Buffer + (Flip / 8);
+                    meow_u8 FlipBit = (1 << (Flip % 8));
+                    *FlipByte |= FlipBit;
+                    
+                    meow_hash Canonical = MeowHash_C(Seed, BufferSize, Buffer);
+                    if(Guard)
                     {
-                        meow_u64 Seed = 0;
-                        
-                        meow_u8 *FlipByte = Buffer + (Flip / 8);
-                        meow_u8 FlipBit = (1 << (Flip % 8));
-                        *FlipByte |= FlipBit;
-                        
-                        meow_u128 Canonical = MeowHash_Accelerated(Seed, BufferSize, Buffer);
-                        if(Guard)
+                        memset(Allocation, 0xFF, CACHE_LINE_ALIGNMENT);
+                        memset(Allocation + CACHE_LINE_ALIGNMENT + BufferSize, 0xFF, CACHE_LINE_ALIGNMENT);
+                    }
+                    
+                    ++TotalPossible;
+                    TRY
+                    {
+                        meow_hash ImpHash = Type->Imp(Seed, BufferSize, Buffer);
+                        if(!MeowHashesAreEqual(Canonical, ImpHash))
                         {
-                            memset(Allocation, 0xFF, CACHE_LINE_ALIGNMENT);
-                            memset(Allocation + CACHE_LINE_ALIGNMENT + BufferSize, 0xFF, CACHE_LINE_ALIGNMENT);
+                            ++ImpError;
                         }
                         
-                        ++TotalPossible;
-                        TRY
+                        if(Type->Absorb)
                         {
-                            meow_u128 ImpHash = Type->Imp(Seed, BufferSize, Buffer);
-                            if(!MeowHashesAreEqual(Canonical, ImpHash))
-                            {
-                                ++ImpError;
-                            }
-                            
                             for(int SplitTest = 0;
                                 SplitTest < 10;
                                 ++SplitTest)
@@ -122,7 +131,7 @@ main(int ArgCount, char **Args)
                                     Count -= Amount;
                                 }
                                 
-                                meow_u128 AbsorbHash = MeowHashEnd(&State, Seed);
+                                meow_hash AbsorbHash = MeowHashEnd(&State, Seed);
                                 if(!MeowHashesAreEqual(Canonical, AbsorbHash))
                                 {
                                     ++StreamError;
@@ -130,58 +139,58 @@ main(int ArgCount, char **Args)
                                 }
                             }
                         }
-                        CATCH
-                        {
-                            ++Unsupported;
-                            break;
-                        }
-                        
-                        if(Guard)
-                        {
-                            memset(Allocation, 0, CACHE_LINE_ALIGNMENT);
-                            memset(Allocation + CACHE_LINE_ALIGNMENT + BufferSize, 0, CACHE_LINE_ALIGNMENT);
-                        }
-                        
-                        *FlipByte &= ~FlipBit;
                     }
+                    CATCH
+                    {
+                        ++Unsupported;
+                        break;
+                    }
+                    
+                    if(Guard)
+                    {
+                        memset(Allocation, 0, CACHE_LINE_ALIGNMENT);
+                        memset(Allocation + CACHE_LINE_ALIGNMENT + BufferSize, 0, CACHE_LINE_ALIGNMENT);
+                    }
+                    
+                    *FlipByte &= ~FlipBit;
                 }
-                printf("\r%s: (%0.0f%%)   ", Type->FullName,
-                       (double)BufferSize * 100.0f / (double)MaxBufferSize);
-                
-                
-                free(Allocation);
             }
+            printf("\r%s: (%0.0f%%)   ", Type->FullName,
+                   (double)BufferSize * 100.0f / (double)MaxBufferSize);
             
-            printf("\r%s: ", Type->FullName);
             
-            if(Unsupported)
+            free(Allocation);
+        }
+        
+        printf("\r%s: ", Type->FullName);
+        
+        if(Unsupported)
+        {
+            printf("UNSUPPORTED");
+        }
+        else
+        {
+            if(ImpError || StreamError)
             {
-                printf("UNSUPPORTED");
+                printf("FAILED");
+                if(ImpError)
+                {
+                    printf(" [direct:%u/%u]", ImpError, TotalPossible);
+                }
+                
+                if(StreamError)
+                {
+                    printf(" [stream:%u/%u]", StreamError, TotalPossible);
+                }
+                
+                Result = -1;
             }
             else
             {
-                if(ImpError || StreamError)
-                {
-                    printf("FAILED");
-                    if(ImpError)
-                    {
-                        printf(" [direct:%u/%u]", ImpError, TotalPossible);
-                    }
-                    
-                    if(StreamError)
-                    {
-                        printf(" [stream:%u/%u]", StreamError, TotalPossible);
-                    }
-                    
-                    Result = -1;
-                }
-                else
-                {
-                    printf("PASSED");
-                }
+                printf("PASSED");
             }
-            printf("\n");
         }
+        printf("\n");
     }
     
     return(Result);

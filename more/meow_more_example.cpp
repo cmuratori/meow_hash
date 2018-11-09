@@ -20,6 +20,7 @@
 // more control, you can define them all yourself to map to your own stuff.
 //
 
+#define MEOW_INCLUDE_C 1 // NOTE(casey): Require the C version, since we'll use it
 #include "meow_intrinsics.h" // NOTE(casey): Platform prerequisites for the Meow hash code (replace with your own, if you want)
 #include "meow_hash.h" // NOTE(casey): The Meow hash code itself
 

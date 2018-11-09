@@ -265,14 +265,13 @@ MegapawHash_256Wide(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit
     
     S01 = Meow256_AESDEC(S01, S23);
     
-    meow_u128 S0 = Meow128FromLow(S01);
-    meow_u128 S1 = Meow128FromHIgh(S01);
+    meow_u128 S0 = Meow128_FromLow(S01);
+    meow_u128 S1 = Meow128_FromHigh(S01);
     
     S0 = Meow128_AESDEC(S0, S1);
     S0 = Meow128_AESDEC(S0, Mixer1);
     
     return(S0);
-    return(Result);
 }
 
 //
@@ -321,7 +320,7 @@ MegapawHash_512Wide(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit
         S4567 = Meow512_AESDEC_Mem(S4567, Source + 64);
         case 1:
         S0123 = Meow512_AESDEC_Mem(S0123, Source);
-        default:
+        default:;
     }
     
     if(Len & 0x3f)
@@ -338,12 +337,12 @@ MegapawHash_512Wide(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit
     
     S0123 = Meow512_AESDEC(S0123, S4567);
     
-    meow_u256 S01 = Meow256FromLow(S0123);
-    meow_u256 S23 = Meow256FromHigh(S0123);
+    meow_u256 S01 = Meow256_FromLow(S0123);
+    meow_u256 S23 = Meow256_FromHigh(S0123);
     S01 = Meow256_AESDEC(S01, S23);
     
-    meow_u128 S0 = Meow128FromLow(S01);
-    meow_u128 S1 = Meow128FromHIgh(S01);
+    meow_u128 S0 = Meow128_FromLow(S01);
+    meow_u128 S1 = Meow128_FromHigh(S01);
     
     S0 = Meow128_AESDEC(S0, S1);
     S0 = Meow128_AESDEC(S0, Mixer1);
