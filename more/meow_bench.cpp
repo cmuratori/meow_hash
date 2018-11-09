@@ -49,40 +49,24 @@ _rotl(int unsigned Value, int Count)
 #define Mb(x) ((meow_u64)(x)*(meow_u64)1024*(meow_u64)1024)
 #define Gb(x) ((meow_u64)(x)*(meow_u64)1024*(meow_u64)1024*(meow_u64)1024)
 
-enum input_size_type
-{
-    InputSizeType_Tiny0,
-    InputSizeType_Tiny1,
-    InputSizeType_Tiny2,
-    InputSizeType_Tiny3,
-    
-    InputSizeType_Small,
-    InputSizeType_Medium,
-    InputSizeType_Large,
-    InputSizeType_Giant,
-    
-    InputSizeType_Count,
-};
-
 struct test_results
 {
     int unsigned HashType;
     
     meow_u64 Size;
-    meow_u64 MinimumClocks;
-    meow_u64 MedianClocks;
+    meow_u64 MinClocks;
+    meow_u64 ExpClocks;
     
-    // NOTE(casey): We follow Fabian Giesen's lead here and prefer the median performance
-    // to the fastest, in the hopes that we will not consider a hash's performance to be
-    // an unusual confluence of chip power distributions and branch predictions that give it
-    // a few really good runs that aren't indicative of its typical performance.
-    double MedianBPC;
+    double MinBPC;
+    double ExpBPC;
 };
 
 struct input_size_test
 {
     meow_u64 ClockCount;
-    meow_u64 *Clocks;
+    meow_u64 ClockAccum;
+    meow_u64 ClockExp;
+    meow_u64 ClockMin;
     
     // NOTE(casey): We use a fake result target for writing in hopes of convincing the optimizer
     // that the computed hashes are actually used, and so won't be optimized out.
@@ -91,6 +75,8 @@ struct input_size_test
     meow_u64 Size;
 };
 
+#define MAX_SIZE_TO_TEST Gb(2)
+#define SIZE_TYPE_COUNT 64
 #define SIZE_COUNT_PER_BATCH 16
 struct input_size_tests
 {
@@ -99,9 +85,10 @@ struct input_size_tests
     input_size_test Sizes[SIZE_COUNT_PER_BATCH];
 
     int unsigned ResultCount;
-    test_results Results[SIZE_COUNT_PER_BATCH * InputSizeType_Count * ArrayCount(NamedHashTypes)];
+    test_results Results[SIZE_COUNT_PER_BATCH * SIZE_TYPE_COUNT * ArrayCount(NamedHashTypes)];
     
-    char *Name;
+    meow_u64 SizeSeries;
+    char Name[64];
 };
 
 static void
@@ -140,30 +127,11 @@ ResultCompare(const void *AInit, const void *BInit)
     {
         Result = -1;
     }
-    else if(A->MedianClocks > B->MedianClocks)
+    else if(A->ExpClocks > B->ExpClocks)
     {
         Result = 1;
     }
-    else if(A->MedianClocks < B->MedianClocks)
-    {
-        Result = -1;
-    }
-    
-    return(Result);
-}
-
-static int
-ClockCompare(const void *AInit, const void *BInit)
-{
-    meow_u64 A = *(meow_u64 *)AInit;
-    meow_u64 B = *(meow_u64 *)BInit;
-    
-    int Result = 0;
-    if(A > B)
-    {
-        Result = 1;
-    }
-    else if(B < A)
+    else if(A->ExpClocks < B->ExpClocks)
     {
         Result = -1;
     }
@@ -172,7 +140,7 @@ ClockCompare(const void *AInit, const void *BInit)
 }
 
 static test_results *
-ComputeStats(int unsigned HashType, input_size_test *Test, input_size_tests *DestTests)
+CommitResults(int unsigned HashType, input_size_test *Test, input_size_tests *DestTests)
 {
     test_results *Results = 0;
     
@@ -181,139 +149,102 @@ ComputeStats(int unsigned HashType, input_size_test *Test, input_size_tests *Des
         Results = DestTests->Results + DestTests->ResultCount++;
         Results->HashType = HashType;
         Results->Size = Test->Size;
+        Results->MinClocks = Test->ClockMin;
+        Results->ExpClocks = Test->ClockExp;
         
-        if(Test->ClockCount)
+        Results->ExpBPC = 0.0f;
+        if(Results->ExpClocks)
         {
-            qsort(Test->Clocks, Test->ClockCount, sizeof(Test->Clocks[0]), ClockCompare);
-            Results->MinimumClocks = Test->Clocks[0];
-            Results->MedianClocks = Test->Clocks[Test->ClockCount / 2];
-            Results->MedianBPC = (double)Test->Size / (double)Results->MedianClocks;
+            Results->ExpBPC = (double)Test->Size / (double)Results->ExpClocks;
+        }
+        
+        Results->MinBPC = 0.0f;
+        if(Results->MinClocks)
+        {
+            Results->MinBPC = (double)Test->Size / (double)Results->MinClocks;
         }
     }
     
     return(Results);
 }
 
-static void
-InitializeTests(input_size_tests *Tests, input_size_type Type, meow_u64 MaxClockCount)
+static int unsigned
+Random(meow_u64 *Series)
 {
-    int unsigned SmallOffset[] =
-    {
-        7,
-        12,
-        3,
-        5,
-        
-        15,
-        8,
-        6,
-        4,
-        
-        11,
-        1,
-        14,
-        0,
-        
-        9,
-        10,
-        2,
-        13,
-    };
+    meow_u64 TestRand = *Series;
     
-    int unsigned RegularOffset[] =
-    {
-        1,
-        2,
-        3,
-        7,
-        
-        15,
-        15 + 11,
-        31,
-        31 + 15,
-        
-        63,
-        63 + 31,
-        127,
-        127 + 63,
-        
-        255,
-        255 + 127,
-        511,
-        513,
-    };
+    // NOTE(casey): This is a XorShift64* (LCG) followed by an O'Neill random rotation (PCG)
+    TestRand ^= TestRand >> 12;
+    TestRand ^= TestRand << 25;
+    TestRand ^= TestRand >> 27;
     
-    char *Name = (char *)"(unnamed test)";
-    meow_u64 Divisor = 1;
-    for(int unsigned SizeIndex = 0;
-        SizeIndex < ArrayCount(Tests->Sizes);
-        ++SizeIndex)
-    {
-        meow_u64 Size = 0;
-        switch(Type)
-        {
-            case InputSizeType_Tiny0:
-            {
-                Name = (char *)"Tiny Input (Pass 1)";
-                Size = 16*SizeIndex + SmallOffset[(0 + SizeIndex) % ArrayCount(SmallOffset)];
-            } break;
-            
-            case InputSizeType_Tiny1:
-            {
-                Name = (char *)"Tiny Input (Pass 2)";
-                Size = 16*SizeIndex + SmallOffset[(4 + SizeIndex) % ArrayCount(SmallOffset)];
-            } break;
-            
-            case InputSizeType_Tiny2:
-            {
-                Name = (char *)"Tiny Input (Pass 3)";
-                Size = 16*SizeIndex + SmallOffset[(8 + SizeIndex) % ArrayCount(SmallOffset)];
-            } break;
-            
-            case InputSizeType_Tiny3:
-            {
-                Name = (char *)"Tiny Input (Pass 4)";
-                Size = 16*SizeIndex + SmallOffset[(12 + SizeIndex) % ArrayCount(SmallOffset)];
-            } break;
-            
-            case InputSizeType_Small:
-            {
-                Name = (char *)"Small Input";
-                Size = (Kb(SizeIndex + 1)) + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
-                Divisor = 10;
-            } break;
-            
-            case InputSizeType_Medium:
-            {
-                Name = (char *)"Medium Input";
-                Size = (Kb(32 * (SizeIndex + 1))) + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
-                Divisor = 200;
-            } break;
-            
-            case InputSizeType_Large:
-            {
-                Name = (char *)"Large Input";
-                Size = (Mb(SizeIndex + 1)) + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
-                Divisor = 15000;
-            } break;
-            
-            case InputSizeType_Giant:
-            {
-                Name = (char *)"Giant Input";
-                Size = (Gb(SizeIndex + 1)) / 4 + RegularOffset[SizeIndex % ArrayCount(RegularOffset)];
-                Divisor = 1000000;
-            } break;
-            
-            default:
-            {
-                fprintf(stderr, "ERROR: Invalid test sizes type requested.\n");
-            } break;
-        }
-        
-        Tests->Sizes[SizeIndex].Size = Size;
-    }
+    int unsigned Result = _rotl((int unsigned)((TestRand ^ (TestRand>>18))>>27), (int)(TestRand >> 59));
+    *Series = TestRand * 2685821657736338717LL;
+    
+    return(Result);
+}
 
-    Tests->Name = Name;
+static void
+InitializeTests(input_size_tests *Tests, int unsigned SizeType, meow_u64 MaxClockCount)
+{
+    char *NameBase = (char *)"(unknown)";
+    meow_u64 Start = 1;
+    meow_u64 End = 1024;
+    meow_u64 Divisor = 1;
+    if(SizeType < 24)
+    {
+        // NOTE(casey): 1b - 1024b
+        NameBase = (char *)"Tiny Input";
+        
+        Start = 1;
+        End = 1024;
+    }
+    else if(SizeType < 44)
+    {
+        // NOTE(casey): 1k - 64k
+        NameBase = (char *)"Small Input";
+        Divisor = 2;
+        
+        Start = Kb(1);
+        End = Kb(64);
+    }
+    else if(SizeType < 58)
+    {
+        // NOTE(casey): 64k - 1mb
+        NameBase = (char *)"Medium Input";
+        Divisor = 10;
+        
+        Start = Kb(64);
+        End = Mb(1);
+    }
+    else if(SizeType < 62)
+    {
+        // NOTE(casey): 1mb - 512mb
+        NameBase = (char *)"Large Input";
+        Divisor = 100;
+        
+        Start = Mb(1);
+        End = Mb(512);
+    }
+    else if(SizeType < 64)
+    {
+        // NOTE(casey): 512mb - 2gb
+        NameBase = (char *)"Giant Input";
+        Divisor = 1000;
+        
+        Start = Mb(512);
+        End = MAX_SIZE_TO_TEST;
+    }
+    
+    meow_u64 Range = End - Start;
+    for(int Index = 0;
+        Index < ArrayCount(Tests->Sizes);
+        ++Index)
+    {
+        Tests->Sizes[Index].Size = Start + (Random(&Tests->SizeSeries) % Range);
+    }
+    
+    sprintf(Tests->Name, "[%u / %u] %s", SizeType + 1, SIZE_TYPE_COUNT, NameBase);
     Tests->MaxClockCount = (MaxClockCount / Divisor);
     Tests->RunsPerHashImplementation = (ArrayCount(Tests->Sizes) * Tests->MaxClockCount);
 }
@@ -331,13 +262,13 @@ PrintLeaderboard(input_size_tests *Tests, FILE *Stream)
         test_results *BestResults = Tests->Results + ResultIndex;
         
         meow_u64 CurSize = BestResults->Size;
-        meow_u64 MedianClocks = BestResults->MedianClocks;
-        meow_u64 MaxClocks = MedianClocks + (MedianClocks/ 100);
+        meow_u64 ExpClocks = BestResults->ExpClocks;
+        meow_u64 MaxClocks = ExpClocks + (ExpClocks/ 100);
         
         fprintf(Stream, "    ");
         PrintSize(Stream, BestResults->Size, true);
         fprintf(Stream, ": %10.0f (%6.03f bytes/cycle) - ",
-                (double)BestResults->MedianClocks, (double)BestResults->MedianBPC);
+                (double)BestResults->ExpClocks, (double)BestResults->ExpBPC);
         
         int TieCount = 0;
         while(ResultIndex < Tests->ResultCount)
@@ -345,7 +276,7 @@ PrintLeaderboard(input_size_tests *Tests, FILE *Stream)
             test_results *Results = Tests->Results + ResultIndex;
             if(Results->Size == CurSize)
             {
-                if(Results->MedianClocks <= MaxClocks)
+                if(Results->ExpClocks <= MaxClocks)
                 {
                     named_hash_type Type = NamedHashTypes[Results->HashType];
                     
@@ -382,18 +313,26 @@ main(int ArgCount, char **Args)
     
     InitializeHashesThatNeedInitializers();
     
-    fprintf(stderr, "\n");
-    fprintf(stderr, "meow_bench %s - basic RDTSC-based benchmark for the Meow hash\n", MEOW_HASH_VERSION_NAME);
-    fprintf(stderr, "    See https://mollyrocket.com/meowhash for details\n");
-    fprintf(stderr, "    WARNING: Counts are NOT accurate if CPU power throttling is enabled\n");
-    fprintf(stderr, "             (You must turn it off in your OS if you haven't yet!)\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Versions compiled into this benchmark:\n");
+    char *CSVFileName = 0;
+    if(ArgCount == 2)
+    {
+        CSVFileName = Args[1];
+    }
+    
+    fprintf(stdout, "\n");
+    fprintf(stdout, "meow_bench %s - basic RDTSC-based benchmark for the Meow hash\n", MEOW_HASH_VERSION_NAME);
+    fprintf(stdout, "    See https://mollyrocket.com/meowhash for details\n");
+    fprintf(stdout, "    WARNING: Counts are NOT accurate if CPU power throttling is enabled\n");
+    fprintf(stdout, "             (You must turn it off in your OS if you haven't yet!)\n");
+    fprintf(stdout, "\n");
+    fprintf(stdout, "Versions compiled into this benchmark:\n");
     
     meow_u64 MaxClockCount = (meow_u64)10000000;
     // NOTE(mmozeiko): Test memory should be aligned to 16 because it contains member with SIMD type
     // which means that compiler can potentially issue aligned store to this SIMD member
     input_size_tests *Tests = (input_size_tests *)aligned_alloc(16, sizeof(input_size_tests));
+    Tests->SizeSeries = 123456789;
+    Tests->ResultCount = 0;
     
     int unsigned TypeCount = ArrayCount(NamedHashTypes);
     for(int unsigned TypeIndex = 0;
@@ -401,205 +340,211 @@ main(int ArgCount, char **Args)
         ++TypeIndex)
     {
         named_hash_type Type = NamedHashTypes[TypeIndex];
-        fprintf(stderr, "    %d. %s\n", TypeIndex + 1, Type.FullName);
+        fprintf(stdout, "    %d. %s\n", TypeIndex + 1, Type.FullName);
     }
+    fprintf(stdout, "\n");
     
-    for(int unsigned SizeIndex = 0;
-        SizeIndex < ArrayCount(Tests->Sizes);
-        ++SizeIndex)
+    void *Buffer = aligned_alloc(CACHE_LINE_ALIGNMENT, MAX_SIZE_TO_TEST);
+    if(Buffer)
     {
-        Tests->Sizes[SizeIndex].Clocks = (meow_u64 *)aligned_alloc(8, MaxClockCount*sizeof(meow_u64));
-    }
-    
-    fprintf(stderr, "\n");
-    
-    for(int unsigned SizeType = 0;
-        SizeType < InputSizeType_Count;
-        ++SizeType)
-    {
-        int unsigned TestCount = ArrayCount(Tests->Sizes);
-
-        InitializeTests(Tests, (input_size_type)SizeType, MaxClockCount);
-        fprintf(stderr, "\n----------------------------------------------------\n");
-        fprintf(stderr, "\n%s\n", Tests->Name);
-        fprintf(stderr, "\n----------------------------------------------------\n");
-        
-        // NOTE(casey): Allocate a buffer for input - if we can't get the biggest one we need, reduce the largest
-        // test down to something we _can_ allocate
-        void *Buffer = 0;
-        while(TestCount)
+        for(int unsigned SizeType = 0;
+            SizeType < SIZE_TYPE_COUNT;
+            ++SizeType)
         {
-            Buffer = aligned_alloc(CACHE_LINE_ALIGNMENT, Tests->Sizes[TestCount - 1].Size);
+            int unsigned TestCount = ArrayCount(Tests->Sizes);
+            
+            InitializeTests(Tests, SizeType, MaxClockCount);
+            fprintf(stdout, "\n----------------------------------------------------\n");
+            fprintf(stdout, "\n%s\n", Tests->Name);
+            fprintf(stdout, "\n----------------------------------------------------\n");
+            
+            //
+            // NOTE(casey): Run the test sizes through each hash, "randomizing" the order to hopefully thwart the branch predictors as much as possible
+            //
+            
             if(Buffer)
             {
-                break;
-            }
-            else
-            {
-                --TestCount;
-            }
-        }
-        
-        //
-        // NOTE(casey): Run the test sizes through each hash, "randomizing" the order to hopefully thwart the branch predictors as much as possible
-        //
-        
-        if(Buffer)
-        {
-            meow_u64 RunsPerHashImplementation = Tests->RunsPerHashImplementation;
-            meow_u64 TestRandSeed = (meow_u64)time(0);
-            for(int unsigned TypeIndex = 0;
-                TypeIndex < TypeCount;
-                ++TypeIndex)
-            {
-                named_hash_type Type = NamedHashTypes[TypeIndex];
-                fprintf(stderr, "\n%s:\n", Type.FullName);
-                
-                // NOTE(casey): Clear the clock count
-                for(int unsigned SizeIndex = 0;
-                    SizeIndex < ArrayCount(Tests->Sizes);
-                    ++SizeIndex)
+                meow_u64 RunsPerHashImplementation = Tests->RunsPerHashImplementation;
+                meow_u64 TestRandSeed = (meow_u64)time(0);
+                for(int unsigned TypeIndex = 0;
+                    TypeIndex < TypeCount;
+                    ++TypeIndex)
                 {
-                    Tests->Sizes[SizeIndex].ClockCount = 0;
-                }
-                
-                TRY
-                {
-                    meow_u64 ClocksSinceLastStatus = 0;
-                    meow_u64 TestRand = TestRandSeed;
-                    for(int unsigned RunIndex = 0;
-                         RunIndex < Tests->RunsPerHashImplementation;
-                         ++RunIndex)
-                    {
-                        // NOTE(casey): This is a XorShift64* LCG followed by an
-                        // O'Neill random rotation
-                        TestRand ^= TestRand >> 12;
-                        TestRand ^= TestRand << 25;
-                        TestRand ^= TestRand >> 27;
-                        int unsigned UseIndex = _rotl((int unsigned)((TestRand ^ (TestRand>>18))>>27), (int)(TestRand >> 59));
-                        TestRand = TestRand * 2685821657736338717LL;
-                        
-                        input_size_test *Test = Tests->Sizes + (UseIndex % TestCount);
-                        
-                        meow_u64 Size = Test->Size;
-                        
-                        // NOTE(casey): Write junk into the buffer to try to thwart the optimizer from removing the actual function call.
-                        // This should also warm the cache so that small inputs will be read from cache instead of from memory.
-                        FuddleBuffer(Size, Buffer, RunIndex);
-                        
-                        int Ignored[4];
-                        int unsigned Ignored2;
-                        __cpuid(Ignored, 0);
-                        meow_u64 StartClock = __rdtsc();
-                        Test->FakeSlot = Type.Imp(0, Size, Buffer);
-                        meow_u64 EndClock = __rdtscp(&Ignored2);
-                        __cpuid(Ignored, 0);
-                        
-                        meow_u64 Clocks = EndClock - StartClock;
-                        if(Test->ClockCount < Tests->MaxClockCount)
-                        {
-                            Test->Clocks[Test->ClockCount++] = Clocks;
-                        }
-                        
-                        ClocksSinceLastStatus += Clocks;
-                        if((RunIndex == (RunsPerHashImplementation - 1)) ||
-                           (ClocksSinceLastStatus > 1000000000ULL))
-                        {
-                            ClocksSinceLastStatus = 0;
-                            fprintf(stderr, "\r    Test %0.0f / %0.0f (%0.0f%%)",
-                                    (double)(RunIndex + 1), (double)RunsPerHashImplementation,
-                                    100.0f * (double)(RunIndex + 1) / (double)RunsPerHashImplementation);
-                        }
-                    }
-                    fprintf(stderr, "\n");
+                    named_hash_type Type = NamedHashTypes[TypeIndex];
+                    fprintf(stdout, "\n%s:\n", Type.FullName);
                     
-                    for(int TestIndex = 0;
-                        TestIndex < TestCount;
-                        ++TestIndex)
+                    // NOTE(casey): Clear the clock count
+                    for(int unsigned SizeIndex = 0;
+                        SizeIndex < ArrayCount(Tests->Sizes);
+                        ++SizeIndex)
                     {
-                        input_size_test *Test = Tests->Sizes + TestIndex;
-                        test_results *Results = ComputeStats(TypeIndex, Test, Tests);
-                        if(Results)
+                        Tests->Sizes[SizeIndex].ClockCount = 0;
+                        Tests->Sizes[SizeIndex].ClockAccum = 0;
+                        Tests->Sizes[SizeIndex].ClockExp = -1ULL;
+                        Tests->Sizes[SizeIndex].ClockMin = -1ULL;
+                    }
+                    
+                    TRY
+                    {
+                        meow_u64 ClocksSinceLastStatus = 0;
+                        meow_u64 TestRand = TestRandSeed;
+                        for(int unsigned RunIndex = 0;
+                            RunIndex < Tests->RunsPerHashImplementation;
+                            ++RunIndex)
                         {
-                            fprintf(stderr, "    ");
-                            PrintSize(stderr, Test->Size, true);
+                            int unsigned UseIndex = Random(&TestRand);
+                            input_size_test *Test = Tests->Sizes + (UseIndex % TestCount);
                             
-                            fprintf(stderr, ": %0.03f bytes/cycle (%0.0f min, %0.0f med in %0.0f samples)\n",
-                                    (double)Results->MedianBPC, (double)Results->MinimumClocks, (double)Results->MedianClocks,
-                                    (double)Test->ClockCount);
+                            meow_u64 Size = Test->Size;
+                            
+                            // NOTE(casey): Write junk into the buffer to try to thwart the optimizer from removing the actual function call.
+                            // This should also warm the cache so that small inputs will be read from cache instead of from memory.
+                            FuddleBuffer(Size, Buffer, RunIndex);
+                            
+                            int Ignored[4];
+                            int unsigned Ignored2;
+                            __cpuid(Ignored, 0);
+                            meow_u64 StartClock = __rdtsc();
+                            Test->FakeSlot = Type.Imp(0, Size, Buffer);
+                            meow_u64 EndClock = __rdtscp(&Ignored2);
+                            __cpuid(Ignored, 0);
+                            
+                            meow_u64 Clocks = EndClock - StartClock;
+                            Test->ClockCount += 1;
+                            Test->ClockAccum += Clocks;
+                            
+                            if(Test->ClockMin > Clocks)
+                            {
+                                Test->ClockMin = Clocks;
+                            }
+                            
+                            int ClocksPerAvg = 1000;
+                            if(Test->ClockCount == ClocksPerAvg)
+                            {
+                                meow_u64 ExpClocks = Test->ClockAccum / Test->ClockCount;
+                                if(Test->ClockExp > ExpClocks)
+                                {
+                                    Test->ClockExp = ExpClocks;
+                                }
+                                
+                                Test->ClockAccum = 0;
+                                Test->ClockCount = 0;
+                            }
+                            
+                            ClocksSinceLastStatus += Clocks;
+                            if((RunIndex == (RunsPerHashImplementation - 1)) ||
+                               (ClocksSinceLastStatus > 1000000000ULL))
+                            {
+                                ClocksSinceLastStatus = 0;
+                                fprintf(stdout, "\r    Test %0.0f / %0.0f (%0.0f%%)",
+                                        (double)(RunIndex + 1), (double)RunsPerHashImplementation,
+                                        100.0f * (double)(RunIndex + 1) / (double)RunsPerHashImplementation);
+                                fflush(stdout);
+                            }
                         }
-                        else
+                        fprintf(stdout, "\n");
+                        
+                        for(int TestIndex = 0;
+                            TestIndex < TestCount;
+                            ++TestIndex)
                         {
-                            fprintf(stderr, "ERROR: Out of result space!\n");
+                            input_size_test *Test = Tests->Sizes + TestIndex;
+                            test_results *Results = CommitResults(TypeIndex, Test, Tests);
+                            if(Results)
+                            {
+                                fprintf(stdout, "    ");
+                                PrintSize(stdout, Test->Size, true);
+                                
+                                fprintf(stdout, ": %0.03f bytes/cycle (%0.0f min, %0.0f exp)\n",
+                                        (double)Results->ExpBPC, (double)Results->MinClocks, (double)Results->ExpClocks);
+                            }
+                            else
+                            {
+                                fprintf(stderr, "ERROR: Out of result space!\n");
+                            }
                         }
                     }
-                    
-                    //
-                    // NOTE(casey): Print the incremental leaderboard
-                    //
-                    PrintLeaderboard(Tests, stderr);
-                    fflush(stderr);
+                    CATCH
+                    {
+                        fprintf(stderr, "    (%s not supported on this CPU)\n",
+                                Type.FullName);
+                    }
                 }
-                CATCH
+                
+                //
+                // NOTE(casey): Print the incremental leaderboard
+                //
+                PrintLeaderboard(Tests, stdout);
+                fflush(stdout);
+                
+                //
+                // NOTE(casey): Print a CSV-style section for peeps who want to graph
+                //
+                
+                if(CSVFileName)
                 {
-                    fprintf(stderr, "    (not supported on this CPU)\n");
+                    FILE *CSV = fopen(CSVFileName, "w");
+                    if(CSV)
+                    {
+                        meow_u64 LastSize = 0;
+                        fprintf(CSV, "Input");
+                        for(int ResultIndex = 0;
+                            ResultIndex < Tests->ResultCount;
+                            ++ResultIndex)
+                        {
+                            test_results *Results = Tests->Results + ResultIndex;
+                            if(Results->Size != LastSize)
+                            {
+                                fprintf(CSV, ",");
+                                LastSize = Results->Size;
+                                PrintSize(CSV, LastSize, false);
+                            }
+                        }
+                        fprintf(CSV, "\n");
+                        
+                        LastSize = 0;
+                        for(int TypeIndex = 0;
+                            TypeIndex < TypeCount;
+                            ++TypeIndex)
+                        {
+                            named_hash_type Type = NamedHashTypes[TypeIndex];
+                            fprintf(CSV, "%s", Type.FullName);
+                            for(int ResultIndex = 0;
+                                ResultIndex < Tests->ResultCount;
+                                ++ResultIndex)
+                            {
+                                test_results *Results = Tests->Results + ResultIndex;
+                                if((Results->HashType == TypeIndex) &&
+                                   (Results->Size != LastSize))
+                                {
+                                    LastSize = Results->Size;
+                                    fprintf(CSV, ",%f", Results->ExpBPC);
+                                }
+                            }
+                            fprintf(CSV, "\n");
+                        }
+                        fprintf(CSV, "\n");
+                        fclose(CSV);
+                    }
+                    else
+                    {
+                        fprintf(stderr, "    (unable to open %s for writing)\n",
+                                CSVFileName);
+                    }
                 }
             }
             
-            free(Buffer);
+            fprintf(stdout, "\n");
+            fflush(stdout);
+            fflush(stderr);
         }
         
-        fprintf(stderr, "\n");
-        
-        fprintf(stderr, "\n");
-        fflush(stderr);
+        free(Buffer);
     }
-    
-    //
-    // NOTE(casey): Print the final leaderboard
-    //
-    PrintLeaderboard(Tests, stderr);
-                                  
-    //
-    // NOTE(casey): Print a CSV-style section for peeps who want to graph
-    //
-    
-    meow_u64 LastSize = 0;
-    fprintf(stdout, "Input");
-    for(int ResultIndex = 0;
-        ResultIndex < Tests->ResultCount;
-        ++ResultIndex)
+    else
     {
-        test_results *Results = Tests->Results + ResultIndex;
-        if(Results->Size != LastSize)
-        {
-            fprintf(stdout, ",");
-            LastSize = Results->Size;
-            PrintSize(stdout, LastSize, false);
-        }
+        fprintf(stderr, "ERROR: Unable to allocate buffer for hashing\n");
     }
-    fprintf(stdout, "\n");
-    
-    for(int TypeIndex = 0;
-        TypeIndex < TypeCount;
-        ++TypeIndex)
-    {
-        named_hash_type Type = NamedHashTypes[TypeIndex];
-        fprintf(stdout, "%s", Type.FullName);
-        for(int ResultIndex = 0;
-            ResultIndex < Tests->ResultCount;
-            ++ResultIndex)
-        {
-            test_results *Results = Tests->Results + ResultIndex;
-            if(Results->HashType == TypeIndex)
-            {
-                fprintf(stdout, ",%f", Results->MedianBPC);
-            }
-        }
-        fprintf(stdout, "\n");
-    }
-    fprintf(stdout, "\n");
-    fflush(stdout);
     
 #if __aarch64__
     disable_pmu(0x008);

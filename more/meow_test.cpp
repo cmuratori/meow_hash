@@ -36,7 +36,7 @@ main(int ArgCount, char **Args)
         meow_u8 *Test = (meow_u8 *)aligned_alloc(CACHE_LINE_ALIGNMENT, 257);
         TRY
         {
-            MeowHash1(0, 256, Test + 1);
+            MeowHash_Accelerated(0, 256, Test + 1);
             printf("supported");
         }
         CATCH
@@ -85,7 +85,7 @@ main(int ArgCount, char **Args)
                         meow_u8 FlipBit = (1 << (Flip % 8));
                         *FlipByte |= FlipBit;
                         
-                        meow_u128 Canonical = MeowHash1(Seed, BufferSize, Buffer);
+                        meow_u128 Canonical = MeowHash_Accelerated(Seed, BufferSize, Buffer);
                         if(Guard)
                         {
                             memset(Allocation, 0xFF, CACHE_LINE_ALIGNMENT);

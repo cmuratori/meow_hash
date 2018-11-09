@@ -18,8 +18,6 @@
 #include <dirent.h>
 #endif
 
-#undef MEOW_HASH_AVX512
-#define MEOW_HASH_AVX512 0
 #define MEOW_INCLUDE_TRUNCATIONS 1
 #include "meow_test.h"
 

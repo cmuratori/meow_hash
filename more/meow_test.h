@@ -41,13 +41,14 @@ static void* aligned_alloc(size_t alignment, size_t size)
 #endif
 
 #include "meow_hash.h"
+#include "more/meow_more.h"
 
 #define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
 
 static meow_u128
 MeowHashTruncate64(meow_u64 Seed, meow_u64 Len, void *Source)
 {
-    meow_u128 Result = MeowHash1(Seed, Len, Source);
+    meow_u128 Result = MeowHash_Accelerated(Seed, Len, Source);
     ((meow_u64 *)&Result)[1] = 0;
     return(Result);
 }
@@ -201,11 +202,7 @@ struct named_hash_type
 static named_hash_type NamedHashTypes[] =
 {
 #define MEOW_HASH_TEST_INDEX_128 0
-    {(char *)"Meow128", (char *)"Meow 128-bit AES-NI 128-wide", MeowHash1, MeowHashAbsorb1},
-#if MEOW_HASH_AVX512
-    {(char *)"Meow128x2", (char *)"Meow 128-bit VAES 256-wide", MeowHash2, MeowHashAbsorb2},
-    {(char *)"Meow128x4", (char *)"Meow 128-bit VAES 512-wide", MeowHash4, MeowHashAbsorb4},
-#endif
+    {(char *)"Meow128", (char *)"Meow 128-bit AES-NI 128-wide", MeowHash_Accelerated, MeowHashAbsorb},
 #if MEOW_INCLUDE_TRUNCATIONS
     {(char *)"Meow64", (char *)"Meow 64-bit AES-NI 128-wide", MeowHashTruncate64},
     {(char *)"Meow32", (char *)"Meow 32-bit AES-NI 128-wide", MeowHashTruncate32},
