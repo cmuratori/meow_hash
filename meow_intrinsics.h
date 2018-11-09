@@ -41,17 +41,21 @@
 //
 
 #if !defined(MEOW_HASH_INTEL) || !defined(MEOW_HASH_ARMV8)
-#if __x86_64__ || __i386__ || _M_AMD64 || _M_IX86
+#if __x86_64__ || _M_AMD64
 #define MEOW_HASH_INTEL 1
+#define MEOW_64BIT 1
+#define MEOW_PAGESIZE 4096
+#elif __i386__  || _M_IX86
+#define MEOW_HASH_INTEL 1
+#define MEOW_64BIT 0
+#define MEOW_PAGESIZE 4096
 #elif __aarch64__ || _M_ARM64
 #define MEOW_HASH_ARMV8 1
+#define MEOW_64BIT 1
+#define MEOW_PAGESIZE 4096
 #else
 #error Cannot determine architecture to use!
 #endif
-#endif
-
-#if !defined(MEOW_HASH_AVX512)
-#define MEOW_HASH_AVX512 0
 #endif
 
 //
@@ -62,6 +66,12 @@
 #define meow_u16 short unsigned
 #define meow_u32 int unsigned
 #define meow_u64 long long unsigned
+
+#if MEOW_64BIT
+#define meow_umm long long unsigned
+#else
+#define meow_umm int unsigned
+#endif
 
 //
 // NOTE(casey): Operations for x64 processors
@@ -83,18 +93,19 @@
 #define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
 #define Meow128_Set64x2_State(Low64, High64) Meow128_Set64x2(Low64, High64)
 
+#define Meow128_And_Mem(A,B) _mm_and_si128((A),_mm_loadu_si128((meow_u128 *)(B)))
+#define Meow128_Shuffle_Mem(Mem,Control) _mm_shuffle_epi8(_mm_loadu_si128((meow_u128 *)(Mem)),_mm_loadu_si128((meow_u128 *)(Control)))
+
 // TODO(casey): Not sure if this should actually be Meow128_Zero(A) ((A) = _mm_setzero_si128()), maybe
 #define Meow128_Zero() _mm_setzero_si128()
 #define Meow128_ZeroState() Meow128_Zero()
 
 #define Meow256_AESDEC(Prior, XOr) _mm256_aesdec_epi128((Prior), (XOr))
 #define Meow256_AESDEC_Mem(Prior, XOr) _mm256_aesdec_epi128((Prior), *(meow_u256 *)(XOr))
-#define Meow256_Store(Value, Ptr) _mm256_store_si256((meow_u256 *)(Ptr), (Value));
 #define Meow256_Zero() _mm256_setzero_si256()
 
 #define Meow512_AESDEC(Prior, XOr) _mm512_aesdec_epi128((Prior), (XOr))
-#define Meow512_AESDEC_Mem(Prior, XOr) _mm512_aesdec_epi128((Prior), *(meow_u256 *)(XOr))
-#define Meow512_Store(Value, Ptr) _mm256_store_si256((meow_u512 *)(Ptr), (Value));
+#define Meow512_AESDEC_Mem(Prior, XOr) _mm512_aesdec_epi128((Prior), *(meow_u512 *)(XOr))
 #define Meow512_Zero() _mm512_setzero_si512()
 
 //
@@ -194,17 +205,9 @@ Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
 
 #endif
 
-#if MEOW_HASH_IACA
-// NOTE(casey): Define this if you'd like to analyze Meow hash with IACA
-#include <iacaMarks.h>
-#define MEOW_ANALYSIS_START IACA_VC64_START
-#define MEOW_ANALYSIS_END IACA_VC64_END
-#else
-#define MEOW_ANALYSIS_START
-#define MEOW_ANALYSIS_END
-#endif
+#define MEOW_HASH_VERSION 4
+#define MEOW_HASH_VERSION_NAME "0.4/himalayan"
 
-struct meow_hash_state;
 typedef meow_u128 meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *Source);
 typedef void meow_absorb_implementation(struct meow_hash_state *State, meow_u64 Len, void *Source);
 
