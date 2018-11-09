@@ -46,7 +46,7 @@ static entire_file ReadEntireFile(char *Filename);
 static void FreeEntireFile(entire_file *File);
 
 static void
-PrintHash(meow_u128 Hash)
+PrintHash(meow_hash Hash)
 {
     meow_u32 *HashU32 = (meow_u32 *)&Hash;
     printf("    %08X-%08X-%08X-%08X\n",
@@ -70,7 +70,7 @@ HashTestBuffer(void)
     }
     
     // NOTE(casey): Ask Meow for the hash
-    meow_u128 Hash = MeowHash_Accelerated(0, Size, Buffer);
+    meow_hash Hash = MeowHash_Accelerated(0, Size, Buffer);
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
     long long unsigned Hash64 = MeowU64From(Hash);
@@ -91,7 +91,7 @@ HashOneFile(char *FilenameA)
     if(A.Contents)
     {
         // NOTE(casey): Ask Meow for the hash
-        meow_u128 HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
+        meow_hash HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
         
         // NOTE(casey): Print the hash
         printf("  Hash of \"%s\":\n", FilenameA);
@@ -110,8 +110,8 @@ CompareTwoFiles(char *FilenameA, char *FilenameB)
     if(A.Contents && B.Contents)
     {
         // NOTE(casey): Hash both files
-        meow_u128 HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
-        meow_u128 HashB = MeowHash_Accelerated(0, B.Size, B.Contents);
+        meow_hash HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
+        meow_hash HashB = MeowHash_Accelerated(0, B.Size, B.Contents);
         
         // NOTE(casey): Check for match
         int HashesMatch = MeowHashesAreEqual(HashA, HashB);

@@ -92,6 +92,7 @@
 #define Meow128_AESDEC_Finalize(A) (A)
 #define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
 #define Meow128_Set64x2_State(Low64, High64) Meow128_Set64x2(Low64, High64)
+#define Meow128_GetAESConstant(Ptr) (*(meow_u128 *)(Ptr));
 
 #define Meow128_And_Mem(A,B) _mm_and_si128((A),_mm_loadu_si128((meow_u128 *)(B)))
 #define Meow128_Shuffle_Mem(Mem,Control) _mm_shuffle_epi8(_mm_loadu_si128((meow_u128 *)(Mem)),_mm_loadu_si128((meow_u128 *)(Control)))
@@ -103,10 +104,16 @@
 #define Meow256_AESDEC(Prior, XOr) _mm256_aesdec_epi128((Prior), (XOr))
 #define Meow256_AESDEC_Mem(Prior, XOr) _mm256_aesdec_epi128((Prior), *(meow_u256 *)(XOr))
 #define Meow256_Zero() _mm256_setzero_si256()
+#define Meow256_PartialLoad(A, B) _mm256_mask_loadu_epi8(_mm256_setzero_si256(), _cvtu32_mask32((1UL<<(B)) - 1), (A))
+#define Meow128_FromLow(A) _mm256_extracti128_si256((A), 0)
+#define Meow128_FromHigh(A) _mm256_extracti128_si256((A), 1)
 
 #define Meow512_AESDEC(Prior, XOr) _mm512_aesdec_epi128((Prior), (XOr))
 #define Meow512_AESDEC_Mem(Prior, XOr) _mm512_aesdec_epi128((Prior), *(meow_u512 *)(XOr))
 #define Meow512_Zero() _mm512_setzero_si512()
+#define Meow512_PartialLoad(A, B) _mm512_mask_loadu_epi8(_mm512_setzero_si512(), _cvtu64_mask64((1ULL<<(B)) - 1), (A))
+#define Meow256_FromLow(A) _mm512_extracti64x4_epi64((A), 0)
+#define Meow256_FromHigh(A) _mm512_extracti64x4_epi64((A), 1)
 
 //
 // NOTE(casey): Operations for ARM processors
@@ -208,7 +215,23 @@ Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
 #define MEOW_HASH_VERSION 4
 #define MEOW_HASH_VERSION_NAME "0.4/himalayan"
 
-typedef meow_u128 meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *Source);
+#if MEOW_INCLUDE_C
+
+union meow_hash
+{
+    meow_u128 u128;
+    meow_u32 u32[4];
+};
+#define Meow128_CopyToHash(A, B) ((B).u128 = (A))
+
+#else
+
+typedef meow_u128 meow_hash;
+#define Meow128_CopyToHash(A, B) ((B) = (A))
+
+#endif
+
+typedef meow_hash meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *Source);
 typedef void meow_absorb_implementation(struct meow_hash_state *State, meow_u64 Len, void *Source);
 
 #define MEOW_HASH_INTRINSICS_H

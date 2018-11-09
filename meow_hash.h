@@ -70,9 +70,9 @@
       way to handle the residual end-of-buffer bytes that dramatically
       improved Meow's small hash performance.
       
-      MARTINS MOZEIKO (https://matrins.ninja) ported Meow to ARM
-      and added the proper preprocessor dressing for clean compilation
-      on a variety of compiler configurations.
+      MARTINS MOZEIKO (https://matrins.ninja) ported Meow to ARM and
+      ANSI-C, and added the proper preprocessor dressing for clean
+      compilation on a variety of compiler configurations.
       
       FABIAN GIESEN (https://fgiesen.wordpress.com) provided support
       for getting the benchmarking working properly across a number
@@ -134,7 +134,7 @@ static const unsigned char MeowMaskLen[32] = {255,255,255,255, 255,255,255,255, 
 
 // TODO(casey): These constants are loaded to initialize the lanes.  Jacob should
 // give us some feedback on what they should _actually_ be set to.
-#define MEOW_S0_INIT {0,1,2,3, 4,5,6,7, 8,9,10,11, 12,13,14,15}
+#define MEOW_S0_INIT { 0, 1, 2, 3,  4, 5, 6, 7,  8, 9,10,11, 12,13,14,15}
 #define MEOW_S1_INIT {16,17,18,19, 20,21,22,23, 24,25,26,27, 28,29,30,31}
 #define MEOW_S2_INIT {32,33,34,35, 36,37,38,39, 40,41,42,43, 44,45,46,47}
 #define MEOW_S3_INIT {48,49,50,51, 52,53,54,55, 56,57,58,59, 60,61,62,63}
@@ -147,19 +147,20 @@ static const unsigned char MeowS3Init[] = MEOW_S3_INIT;
 // NOTE(casey): 128-wide AES-NI Meow (maximum of 16 bytes/clock single threaded)
 //
 
-static meow_u128
+static meow_hash
 MeowHash_Accelerated(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceInit)
 {
     //
-    // NOTE(casey): Initialize all 16 streams to 0
+    // NOTE(casey): Initialize the four AES streams and the mixer
     //
     
-    // TODO(casey): Hopefully the compiler is smart enough to generate the correct aligned/unaligned
-    // load instruction here, since it knows the address at compile time?
-    meow_aes_128 S0 = *(meow_u128 *)MeowS0Init;
-    meow_aes_128 S2 = *(meow_u128 *)MeowS2Init;
-    meow_aes_128 S3 = *(meow_u128 *)MeowS3Init;
-    meow_aes_128 S1 = *(meow_u128 *)MeowS1Init;
+    meow_aes_128 S0 = Meow128_GetAESConstant(MeowS0Init);
+    meow_aes_128 S1 = Meow128_GetAESConstant(MeowS1Init);
+    meow_aes_128 S2 = Meow128_GetAESConstant(MeowS2Init);
+    meow_aes_128 S3 = Meow128_GetAESConstant(MeowS3Init);
+    
+    meow_u128 Mixer = Meow128_Set64x2(Seed - TotalLengthInBytes,
+                                      Seed + TotalLengthInBytes + 1);
     
     //
     // NOTE(casey): Handle as many full 256-byte blocks as possible
@@ -167,54 +168,31 @@ MeowHash_Accelerated(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceIni
     
     meow_u8 *Source = (meow_u8 *)SourceInit;
     meow_u64 Len = TotalLengthInBytes;
-    meow_u64 BlockCount = (Len >> 6);
-    Len -= (BlockCount << 6);
-    while(BlockCount--)
+    int unsigned Len8 = Len & 15;
+    int unsigned Len128 = Len & 48;
+    
+    while(Len >= 64)
     {
         S0 = Meow128_AESDEC_Mem(S0, Source);
         S1 = Meow128_AESDEC_Mem(S1, Source + 16);
         S2 = Meow128_AESDEC_Mem(S2, Source + 32);
         S3 = Meow128_AESDEC_Mem(S3, Source + 48);
         
+        Len -= 64;
         Source += 64;
     }
     
     //
-    // NOTE(casey): Handle as many full 128-bit lanes as possible
+    // NOTE(casey): Overhanging individual bytes
     //
     
-    switch(Len >> 4)
+    if(Len8)
     {
-        case  3: S2 = Meow128_AESDEC_Mem(S2, Source + 32);
-        case  2: S1 = Meow128_AESDEC_Mem(S1, Source + 16);
-        case  1: S0 = Meow128_AESDEC_Mem(S0, Source);
-        default:;
-    }
-    Source += (Len & 0xF0);
-    
-    //
-    // NOTE(casey): Start as much of the mixdown as we can before handling the overhang
-    //
-    
-    // TODO(casey): There needs to be a solid idea behind the mixing vector here.
-    // Before Meow v1, we need some definitive analysis of what it should be.
-    meow_u128 Mixer = Meow128_Set64x2(Seed - TotalLengthInBytes, Seed + TotalLengthInBytes + 1);
-
-    S0 = Meow128_AESDEC(S0, Mixer);
-    S1 = Meow128_AESDEC(S1, Mixer);
-    S2 = Meow128_AESDEC(S2, Mixer);
-    
-    //
-    // NOTE(casey): Deal with individual bytes
-    //
-
-    if(Len & 15)
-    {
-        Len &= 15;
-        int Align = ((int)(meow_umm)Source) & 15;
+        meow_u8 *Overhang = Source + Len128;
+        int Align = ((int)(meow_umm)Overhang) & 15;
         if(Align)
         {
-            int End = ((int)(meow_umm)Source) & (MEOW_PAGESIZE - 1);
+            int End = ((int)(meow_umm)Overhang) & (MEOW_PAGESIZE - 1);
         
             // NOTE(jeffr): If we are nowhere near the page end, use full unaligned load (cmov to set)
             if (End <= (MEOW_PAGESIZE - 16))
@@ -223,37 +201,56 @@ MeowHash_Accelerated(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceIni
             }
             
             // NOTE(jeffr): If we will read over the page end, use a full unaligned load (cmov to set)
-            if ((End + Len) > MEOW_PAGESIZE)
+            if ((End + Len8) > MEOW_PAGESIZE)
             {
                 Align = 0;
             }
             
-            meow_aes_128 PartialState = Meow128_Shuffle_Mem(Source - Align, &MeowShiftAdjust[Align]);
+            meow_aes_128 PartialState = Meow128_Shuffle_Mem(Overhang - Align, &MeowShiftAdjust[Align]);
             
-            PartialState = Meow128_And_Mem( PartialState, &MeowMaskLen[16 - Len] );
+            PartialState = Meow128_And_Mem( PartialState, &MeowMaskLen[16 - Len8] );
             S3 = Meow128_AESDEC(S3, PartialState);
         }
         else
         {
-            meow_u128 PartialState = Meow128_And_Mem(*(meow_u128 *)Source, &MeowMaskLen[16 - Len]);
+            // NOTE(casey): We don't have to do Jeff's heroics when we know the
+            // buffer is aligned, since we cannot span a memory page (by definition).
+            meow_u128 PartialState = Meow128_And_Mem(*(meow_u128 *)Overhang, &MeowMaskLen[16 - Len8]);
             S3 = Meow128_AESDEC(S3, PartialState);
         }
     }
     
     //
-    // NOTE(casey): Finish the part of the mixdown that is dependent on S3
-    // and then do the tree reduction (starting the tree reduction early
-    // doesn't seem to save anything)
+    // NOTE(casey): Overhanging full 128-bit lanes
+    //
+    
+    switch(Len128)
+    {
+        case 48: S2 = Meow128_AESDEC_Mem(S2, Source + 32);
+        case 32: S1 = Meow128_AESDEC_Mem(S1, Source + 16);
+        case 16: S0 = Meow128_AESDEC_Mem(S0, Source);
+    }
+    
+    //
+    // NOTE(casey): Mix the four lanes down to one 128-bit hash
     //
     
     S3 = Meow128_AESDEC(S3, Mixer);
-    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S2));
-    S1 = Meow128_AESDEC(S1, Meow128_AESDEC_Finalize(S3));
+    S2 = Meow128_AESDEC(S2, Mixer);
     S1 = Meow128_AESDEC(S1, Mixer);
-    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S1));
     S0 = Meow128_AESDEC(S0, Mixer);
     
-    meow_u128 Result = Meow128_AESDEC_Finalize(S0);
+    S2 = Meow128_AESDEC(S2, Meow128_AESDEC_Finalize(S3));
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S1));
+    
+    S2 = Meow128_AESDEC(S2, Mixer);
+    
+    S0 = Meow128_AESDEC(S0, Meow128_AESDEC_Finalize(S2));
+    S0 = Meow128_AESDEC(S0, Mixer);
+    
+    meow_hash Result;
+    Meow128_CopyToHash(Meow128_AESDEC_Finalize(S0), Result);
+    
     return(Result);
 }
 
@@ -278,9 +275,14 @@ MeowU32From(meow_u128 Hash)
 }
 
 static int
-MeowHashesAreEqual(meow_u128 A, meow_u128 B)
+MeowHashesAreEqual(meow_hash A, meow_hash B)
 {
+#if MEOW_INCLUDE_C
+    int Result = Meow128_AreEqual(A.u128, B.u128);
+#else
     int Result = Meow128_AreEqual(A, B);
+#endif
+    
     return(Result);
 }
 
