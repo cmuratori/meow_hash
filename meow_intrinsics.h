@@ -245,6 +245,7 @@ typedef meow_u128 meow_hash;
 
 #endif
 
+typedef struct meow_hash_state meow_hash_state;
 typedef meow_hash meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *Source);
 typedef void meow_absorb_implementation(struct meow_hash_state *State, meow_u64 Len, void *Source);
 
