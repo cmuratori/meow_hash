@@ -86,7 +86,10 @@
 #define meow_u512 __m512i
 #define meow_aes_512 __m512i
 
-#define Meow128_AreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A), (B))) == 0xFFFF)
+#define MeowU32From(A, I) (_mm_extract_epi32((A), (I)))
+#define MeowU64From(A, I) (_mm_extract_epi64((A), (I)))
+#define MeowHashesAreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A), (B))) == 0xFFFF)
+
 #define Meow128_AESDEC(Prior, Xor) _mm_aesdec_si128((Prior), (Xor))
 #define Meow128_AESDEC_Mem(Prior, Xor) _mm_aesdec_si128((Prior), _mm_loadu_si128((meow_u128 *)(Xor)))
 #define Meow128_AESDEC_Finalize(A) (A)
@@ -217,12 +220,23 @@ Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
 
 #if MEOW_INCLUDE_C
 
+// NOTE(casey): Unfortunately, if you want an ANSI-C version, we have to slow everyone
+// else down because you can't return 128-bit values by register anymore (in case the
+// CPU doesn't support that)
 union meow_hash
 {
     meow_u128 u128;
+    meow_u64 u64[2];
     meow_u32 u32[4];
 };
 #define Meow128_CopyToHash(A, B) ((B).u128 = (A))
+
+#undef MeowU64From
+#undef MeowU32From
+#undef MeowHashesAreEqual
+#define MeowU32From(A, I) ((A).u32[I])
+#define MeowU64From(A, I) ((A).u64[I])
+#define MeowHashesAreEqual(A, B) (((A).u32[0] == (B).u32[0]) && ((A).u32[1] == (B).u32[1]) && ((A).u32[2] == (B).u32[2]) && ((A).u32[3] == (B).u32[3]))
 
 #else
 

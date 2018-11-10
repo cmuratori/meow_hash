@@ -48,12 +48,11 @@ static void FreeEntireFile(entire_file *File);
 static void
 PrintHash(meow_hash Hash)
 {
-    meow_u32 *HashU32 = (meow_u32 *)&Hash;
     printf("    %08X-%08X-%08X-%08X\n",
-           HashU32[3],
-           HashU32[2],
-           HashU32[1],
-           HashU32[0]);
+           MeowU32From(Hash, 3),
+           MeowU32From(Hash, 2),
+           MeowU32From(Hash, 1),
+           MeowU32From(Hash, 0));
 }
 
 static void
@@ -73,8 +72,8 @@ HashTestBuffer(void)
     meow_hash Hash = MeowHash_Accelerated(0, Size, Buffer);
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
-    long long unsigned Hash64 = MeowU64From(Hash);
-    int unsigned Hash32 = MeowU32From(Hash);
+    long long unsigned Hash64 = MeowU64From(Hash, 0);
+    int unsigned Hash32 = MeowU32From(Hash, 0);
     
     // NOTE(casey): Print the hash
     printf("  Hash of a test buffer:\n");

@@ -253,38 +253,3 @@ MeowHash_Accelerated(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceIni
     
     return(Result);
 }
-
-#if !defined(MEOW_HELPERS)
-
-static meow_u64
-MeowU64From(meow_u128 Hash)
-{
-    // TODO(casey): It is probably worth it to use the cvt intrinsics here
-    // TODO(mmozeiko): use vgetq_lane_u64 on ARMv8
-    meow_u64 Result = *(meow_u64 *)&Hash;
-    return(Result);
-}
-
-static meow_u32
-MeowU32From(meow_u128 Hash)
-{
-    // TODO(casey): It is probably worth it to use the cvt intrinsics here
-    // TODO(mmozeiko): use vgetq_lane_u32 on ARMv8
-    meow_u32 Result = *(meow_u32 *)&Hash;
-    return(Result);
-}
-
-static int
-MeowHashesAreEqual(meow_hash A, meow_hash B)
-{
-#if MEOW_INCLUDE_C
-    int Result = Meow128_AreEqual(A.u128, B.u128);
-#else
-    int Result = Meow128_AreEqual(A, B);
-#endif
-    
-    return(Result);
-}
-
-#define MEOW_HELPERS
-#endif
