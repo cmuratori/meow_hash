@@ -233,7 +233,7 @@ IngestFile(test_group *Group, char *FileName)
             
             meow_hash Hash = Test->Type.Imp(0, File.Size, File.Contents);
             
-            test_value **Slot = &Test->Table[MeowU32From(Hash) % ArrayCount(Test->Table)];
+            test_value **Slot = &Test->Table[MeowU32From(Hash, 0) % ArrayCount(Test->Table)];
             test_value *Entry = *Slot;
             while(Entry && memcmp(&Entry->Hash, &Hash, sizeof(Hash)))
             {

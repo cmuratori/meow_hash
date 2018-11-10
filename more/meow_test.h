@@ -263,8 +263,11 @@ PrintSize(FILE *Stream, double Size, int Fixed)
 static void
 PrintHash(FILE *Stream, meow_hash Hash)
 {
-    meow_u32 *HashU32 = (meow_u32 *)&Hash;
-    fprintf(Stream, "%08X-%08X-%08X-%08X", HashU32[3], HashU32[2], HashU32[1], HashU32[0]);
+    fprintf(Stream, "%08X-%08X-%08X-%08X", 
+            MeowU32From(Hash, 3), 
+            MeowU32From(Hash, 2), 
+            MeowU32From(Hash, 1), 
+            MeowU32From(Hash, 0)); 
 }
 
 static void

@@ -18,20 +18,20 @@ void
 Meow1_32(const void * key, int len, meow_u32 seed, void * out)
 {
     meow_u128 Result = MeowHash_Accelerated(seed, len, (void *)key);
-    *(meow_u32 *)out = *(meow_u32 *)&Result;
+    *(meow_u32 *)out = MeowU32From(Result, 0);
 }
 
 void
 Meow1_64(const void * key, int len, meow_u32 seed, void * out)
 {
     meow_u128 Result = MeowHash_Accelerated(seed, len, (void *)key);
-    ((meow_u64 *)out)[0] = ((meow_u64 *)&Result)[0];
+    ((meow_u64 *)out)[0] = MeowU64From(Result, 0);
 }
 
 void
 Meow1_128(const void * key, int len, meow_u32 seed, void * out)
 {
     meow_u128 Result = MeowHash_Accelerated(seed, len, (void *)key);
-    ((meow_u64 *)out)[0] = ((meow_u64 *)&Result)[0];
-    ((meow_u64 *)out)[1] = ((meow_u64 *)&Result)[1];
+    ((meow_u64 *)out)[0] = MeowU64From(Result, 0);
+    ((meow_u64 *)out)[1] = MeowU64From(Result, 1);
 }
