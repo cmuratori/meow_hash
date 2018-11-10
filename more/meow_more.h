@@ -39,10 +39,10 @@ MeowHashBegin(meow_hash_state *State)
 static void
 MeowHashAbsorbBlocks(meow_hash_state *State, meow_u64 BlockCount, meow_u8 *Source)
 {
-    meow_u128 S0 = State->S0;
-    meow_u128 S1 = State->S1;
-    meow_u128 S2 = State->S2;
-    meow_u128 S3 = State->S3;
+    meow_aes_128 S0 = State->S0;
+    meow_aes_128 S1 = State->S1;
+    meow_aes_128 S2 = State->S2;
+    meow_aes_128 S3 = State->S3;
     
     while(BlockCount--)
     {
@@ -138,11 +138,11 @@ MeowHashEnd(meow_hash_state *State, meow_u64 Seed)
         {
             Align = 0;
         }
+
+        meow_u128 Partial = Meow128_Shuffle_Mem(Source - Align, &MeowShiftAdjust[Align]);
         
-        meow_aes_128 PartialState = Meow128_Shuffle_Mem(Source - Align, &MeowShiftAdjust[Align]);
-        
-        PartialState = Meow128_And_Mem( PartialState, &MeowMaskLen[16 - Len] );
-        S3 = Meow128_AESDEC(S3, PartialState);
+        Partial = Meow128_And_Mem( Partial, &MeowMaskLen[16 - Len] );
+        S3 = Meow128_AESDEC(S3, Partial);
     }
     
     meow_u128 Mixer = Meow128_Set64x2(Seed - State->TotalLengthInBytes,
