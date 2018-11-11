@@ -1,6 +1,6 @@
 /* ========================================================================
 
-   meow_example.cpp - basic usage example of the Meow hash
+   megapaw_example.cpp - basic usage example of the Megapaw hash
    (C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)
    
    See https://mollyrocket.com/meowhash for details.
@@ -12,25 +12,63 @@
 #include <memory.h>
 
 //
-// NOTE(casey): Step 1 - include an intrinsics header, then include meow_hash.h
+// NOTE(casey): Step 1 - include an intrinsics header, then include megapaw_hash.h
 //
-// Meow relies on definitions for non-standard types (meow_u128, etc.) and
+// Megapaw relies on definitions for non-standard types (meow_u128, etc.) and
 // intrinsics for various platforms. You can either include the supplied meow_intrinsics.h
 // file that will define these for you with its best guesses for your platform, or for
 // more control, you can define them all yourself to map to your own stuff.
 //
 
-#include "meow_intrinsics.h" // NOTE(casey): Platform prerequisites for the Meow hash code (replace with your own, if you want)
-#include "meow_hash.h" // NOTE(casey): The Meow hash code itself
+#include "meow_intrinsics.h" // NOTE(casey): Platform prerequisites for the Megapaw hash code (replace with your own, if you want)
+#include "megapaw_hash.h" // NOTE(casey): The Megapaw hash code itself
 
 //
-// NOTE(casey): Step 2 - use the Meow hash in a variety of ways!
+// NOTE(casey): Step 2 - detect which Megapaw hash the CPU can run
+//
+
+static meow_hash_implementation *MegapawHash = MegapawHash_128Wide;
+
+int MegapawHashSpecializeForCPU(void)
+{
+    int Result = 0;
+    
+    try
+    {
+        char Garbage[64];
+        MegapawHash_512Wide(0, sizeof(Garbage), Garbage);
+        MegapawHash = MegapawHash_512Wide;
+        Result = 512;
+    }
+    catch(...)
+    {
+        try
+        {
+            char Garbage[64];
+            MegapawHash_256Wide(0, sizeof(Garbage), Garbage);
+            MegapawHash = MegapawHash_256Wide;
+            Result = 256;
+        }
+        catch(...)
+        {
+            char Garbage[64];
+            MegapawHash_128Wide(0, sizeof(Garbage), Garbage);
+            MegapawHash = MegapawHash_128Wide;
+            Result = 128;
+        }
+    }
+    
+    return(Result);
+}
+
+//
+// NOTE(casey): Step 3 - use the Megapaw hash in a variety of ways!
 //
 // Example functions below:
-//   PrintHash - how to print a Meow hash to stdout, from highest-order 32-bits to lowest
-//   HashTestBuffer - how to have Meow hash a buffer of data
-//   HashOneFile - have Meow hash the contents of a file
-//   CompareTwoFiles - have Meow hash the contents of two files, and check for equivalence
+//   PrintHash - how to print a Megapaw hash to stdout, from highest-order 32-bits to lowest
+//   HashTestBuffer - how to have Megapaw hash a buffer of data
+//   HashOneFile - have Megapaw hash the contents of a file
+//   CompareTwoFiles - have Megapaw hash the contents of two files, and check for equivalence
 //
 
 //
@@ -46,13 +84,14 @@ static entire_file ReadEntireFile(char *Filename);
 static void FreeEntireFile(entire_file *File);
 
 static void
-PrintHash(meow_hash Hash)
+PrintHash(meow_u128 Hash)
 {
+    meow_u32 *HashU32 = (meow_u32 *)&Hash;
     printf("    %08X-%08X-%08X-%08X\n",
-           MeowU32From(Hash, 3),
-           MeowU32From(Hash, 2),
-           MeowU32From(Hash, 1),
-           MeowU32From(Hash, 0));
+           HashU32[3],
+           HashU32[2],
+           HashU32[1],
+           HashU32[0]);
 }
 
 static void
@@ -68,12 +107,12 @@ HashTestBuffer(void)
         Buffer[Index] = (char)Index;
     }
     
-    // NOTE(casey): Ask Meow for the hash
-    meow_hash Hash = MeowHash_Accelerated(0, Size, Buffer);
+    // NOTE(casey): Ask Megapaw for the hash
+    meow_u128 Hash = MegapawHash(0, Size, Buffer);
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
-    long long unsigned Hash64 = MeowU64From(Hash, 0);
-    int unsigned Hash32 = MeowU32From(Hash, 0);
+    long long unsigned Hash64 = MeowU64From(Hash);
+    int unsigned Hash32 = MeowU32From(Hash);
     
     // NOTE(casey): Print the hash
     printf("  Hash of a test buffer:\n");
@@ -89,8 +128,8 @@ HashOneFile(char *FilenameA)
     entire_file A = ReadEntireFile(FilenameA);
     if(A.Contents)
     {
-        // NOTE(casey): Ask Meow for the hash
-        meow_hash HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
+        // NOTE(casey): Ask Megapaw for the hash
+        meow_u128 HashA = MegapawHash(0, A.Size, A.Contents);
         
         // NOTE(casey): Print the hash
         printf("  Hash of \"%s\":\n", FilenameA);
@@ -109,8 +148,8 @@ CompareTwoFiles(char *FilenameA, char *FilenameB)
     if(A.Contents && B.Contents)
     {
         // NOTE(casey): Hash both files
-        meow_hash HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
-        meow_hash HashB = MeowHash_Accelerated(0, B.Size, B.Contents);
+        meow_u128 HashA = MegapawHash(0, A.Size, A.Contents);
+        meow_u128 HashB = MegapawHash(0, B.Size, B.Contents);
         
         // NOTE(casey): Check for match
         int HashesMatch = MeowHashesAreEqual(HashA, HashB);
@@ -124,7 +163,7 @@ CompareTwoFiles(char *FilenameA, char *FilenameB)
         }
         else if(FilesMatch)
         {
-            printf("MEOW HASH FAILURE: Files match but hashes don't!\n");
+            printf("MEGAPAW HASH FAILURE: Files match but hashes don't!\n");
             printf("  Hash of \"%s\":\n", FilenameA);
             PrintHash(HashA);
             printf("  Hash of \"%s\":\n", FilenameB);
@@ -132,7 +171,7 @@ CompareTwoFiles(char *FilenameA, char *FilenameB)
         }
         else if(HashesMatch)
         {
-            printf("MEOW HASH FAILURE: Hashes match but files don't!\n");
+            printf("MEGAPAW HASH FAILURE: Hashes match but files don't!\n");
             printf("  Hash of both \"%s\" and \"%s\":\n", FilenameA, FilenameB);
             PrintHash(HashA);
         }
@@ -159,10 +198,14 @@ int
 main(int ArgCount, char **Args)
 {
     // NOTE(casey): Print the banner
-    printf("meow_example %s - basic usage example of the Meow hash\n", MEOW_HASH_VERSION_NAME);
+    printf("megapaw_example %s - basic usage example of the Megapaw hash\n", MEOW_HASH_VERSION_NAME);
     printf("(C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)\n");
     printf("See https://mollyrocket.com/meowhash for details.\n");
     printf("\n");
+    
+    // NOTE(casey): Detect which MegapawHash to call - do this only once, at startup.
+    int BitWidth = MegapawHashSpecializeForCPU();
+    printf("Using %u-bit Megapaw implementation\n", BitWidth);
     
     // NOTE(casey): Look at our arguments to decide which example to run
     if(ArgCount < 2)
