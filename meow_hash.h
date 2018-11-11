@@ -206,17 +206,17 @@ MeowHash_Accelerated(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceIni
                 Align = 0;
             }
             
-            meow_aes_128 PartialState = Meow128_Shuffle_Mem(Overhang - Align, &MeowShiftAdjust[Align]);
+            meow_u128 Partial = Meow128_Shuffle_Mem(Overhang - Align, &MeowShiftAdjust[Align]);
             
-            PartialState = Meow128_And_Mem( PartialState, &MeowMaskLen[16 - Len8] );
-            S3 = Meow128_AESDEC(S3, PartialState);
+            Partial = Meow128_And_Mem( Partial, &MeowMaskLen[16 - Len8] );
+            S3 = Meow128_AESDEC(S3, Partial);
         }
         else
         {
             // NOTE(casey): We don't have to do Jeff's heroics when we know the
             // buffer is aligned, since we cannot span a memory page (by definition).
-            meow_u128 PartialState = Meow128_And_Mem(*(meow_u128 *)Overhang, &MeowMaskLen[16 - Len8]);
-            S3 = Meow128_AESDEC(S3, PartialState);
+            meow_u128 Partial = Meow128_And_Mem(*(meow_u128 *)Overhang, &MeowMaskLen[16 - Len8]);
+            S3 = Meow128_AESDEC(S3, Partial);
         }
     }
     

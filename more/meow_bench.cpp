@@ -75,7 +75,11 @@ struct input_size_test
     meow_u64 Size;
 };
 
+#ifdef __aarch64__
+#define MAX_SIZE_TO_TEST Gb(1)
+#else
 #define MAX_SIZE_TO_TEST Gb(2)
+#endif
 #define SIZE_TYPE_COUNT 64
 #define SIZE_COUNT_PER_BATCH 16
 struct input_size_tests

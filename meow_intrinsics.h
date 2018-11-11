@@ -95,14 +95,13 @@
 #define Meow128_AESDEC_Finalize(A) (A)
 #define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
 #define Meow128_Set64x2_State(Low64, High64) Meow128_Set64x2(Low64, High64)
-#define Meow128_GetAESConstant(Ptr) (*(meow_u128 *)(Ptr));
+#define Meow128_GetAESConstant(Ptr) (*(meow_u128 *)(Ptr))
 
 #define Meow128_And_Mem(A,B) _mm_and_si128((A),_mm_loadu_si128((meow_u128 *)(B)))
 #define Meow128_Shuffle_Mem(Mem,Control) _mm_shuffle_epi8(_mm_loadu_si128((meow_u128 *)(Mem)),_mm_loadu_si128((meow_u128 *)(Control)))
 
 // TODO(casey): Not sure if this should actually be Meow128_Zero(A) ((A) = _mm_setzero_si128()), maybe
 #define Meow128_Zero() _mm_setzero_si128()
-#define Meow128_ZeroState() Meow128_Zero()
 
 #define Meow256_AESDEC(Prior, XOr) _mm256_aesdec_epi128((Prior), (XOr))
 #define Meow256_AESDEC_Mem(Prior, XOr) _mm256_aesdec_epi128((Prior), *(meow_u256 *)(XOr))
@@ -141,8 +140,11 @@ typedef struct {
     meow_u128 B;
 } meow_aes_128;
 
+#define MeowU32From(A, I) (vgetq_lane_u32(vreinterpretq_u32_u8((A)), (I)))
+#define MeowU64From(A, I) (vgetq_lane_u64(vreinterpretq_u64_u8((A)), (I)))
+
 static int
-Meow128_AreEqual(meow_u128 A, meow_u128 B)
+MeowHashesAreEqualImpl(meow_u128 A, meow_u128 B)
 {
     uint8x16_t Powers = {
         1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128,
@@ -156,6 +158,8 @@ Meow128_AreEqual(meow_u128 A, meow_u128 B)
     vst1q_lane_u8((meow_u8*)&Output + 1, vreinterpretq_u8_u64(Mask), 8);
     return Output == 0xFFFF;
 }
+
+#define MeowHashesAreEqual(A, B) MeowHashesAreEqualImpl((A), (B))
 
 static meow_aes_128
 Meow128_AESDEC(meow_aes_128 Prior, meow_u128 Xor)
@@ -190,10 +194,11 @@ Meow128_Zero()
 }
 
 static meow_aes_128
-Meow128_ZeroState()
+Meow128_GetAESConstant(const meow_u8 *Ptr)
 {
     meow_aes_128 R;
-    R.A = R.B = vdupq_n_u8(0);
+    R.A = vld1q_u8(Ptr);
+    R.B = vdupq_n_u8(0);
     return(R);
 }
 
@@ -212,6 +217,9 @@ Meow128_Set64x2_State(meow_u64 Low64, meow_u64 High64)
    R.B = Meow128_Zero();
    return(R);
 }
+
+#define Meow128_And_Mem(A,B) vandq_u8((A), vld1q_u8((meow_u8 *)B))
+#define Meow128_Shuffle_Mem(Mem,Control) vqtbl1q_u8(vld1q_u8((meow_u8 *)(Mem)),vld1q_u8((meow_u8 *)(Control)))
 
 #endif
 
@@ -245,6 +253,7 @@ typedef meow_u128 meow_hash;
 
 #endif
 
+typedef struct meow_hash_state meow_hash_state;
 typedef meow_hash meow_hash_implementation(meow_u64 Seed, meow_u64 Len, void *Source);
 typedef void meow_absorb_implementation(struct meow_hash_state *State, meow_u64 Len, void *Source);
 

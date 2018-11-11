@@ -33,7 +33,7 @@ matrix:
     # test if meow_hash.h compiles as C
     - touch test.c
     - |-
-      "${CC}" -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+      "${CC}" -c -mssse3 -maes -include meow_intrinsics.h -include meow_hash.h test.c
     # build & test
     - cmd.exe /C build.bat
     - build_clang/meow_test.exe
@@ -50,7 +50,7 @@ matrix:
     script:
     # test if meow_hash.h compiles as C
     - touch test.c
-    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    - ${CC} -c -mssse3 -maes -include meow_intrinsics.h -include meow_hash.h test.c
     # build & test
     - ./build.sh
     - build/meow_test.exe
@@ -75,7 +75,7 @@ matrix:
     script:
     # test if meow_hash.h compiles as C
     - touch test.c
-    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    - ${CC} -c -mssse3 -maes -include meow_intrinsics.h -include meow_hash.h test.c
     # build & test
     - ./build.sh
     - ./build/meow_test
@@ -99,7 +99,7 @@ matrix:
     script:
     # test if meow_hash.h compiles as C
     - touch test.c
-    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    - ${CC} -c -mssse3 -maes -include meow_intrinsics.h -include meow_hash.h test.c
     # build & test
     - ./build.sh
     - ./build/meow_test
@@ -149,7 +149,7 @@ matrix:
     script:
     # test if meow_hash.h compiles as C
     - touch test.c
-    - ${CC} -c -maes -include meow_intrinsics.h -include meow_hash.h test.c
+    - ${CC} -c -mssse3 -maes -include meow_intrinsics.h -include meow_hash.h test.c
     # build & test
     - ./build.sh
     - ./build/meow_test
