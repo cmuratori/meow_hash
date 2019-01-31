@@ -95,10 +95,10 @@
 #define Meow128_AESDEC_Finalize(A) (A)
 #define Meow128_Set64x2(Low64, High64) _mm_set_epi64x((High64), (Low64))
 #define Meow128_Set64x2_State(Low64, High64) Meow128_Set64x2(Low64, High64)
-#define Meow128_GetAESConstant(Ptr) (*(meow_u128 *)(Ptr))
+#define Meow128_GetAESConstant(Ptr) (*(const meow_u128 *)(Ptr))
 
-#define Meow128_And_Mem(A,B) _mm_and_si128((A),_mm_loadu_si128((meow_u128 *)(B)))
-#define Meow128_Shuffle_Mem(Mem,Control) _mm_shuffle_epi8(_mm_loadu_si128((meow_u128 *)(Mem)),_mm_loadu_si128((meow_u128 *)(Control)))
+#define Meow128_And_Mem(A,B) _mm_and_si128((A),_mm_loadu_si128((const meow_u128 *)(B)))
+#define Meow128_Shuffle_Mem(Mem,Control) _mm_shuffle_epi8(_mm_loadu_si128((const meow_u128 *)(Mem)),_mm_loadu_si128((const meow_u128 *)(Control)))
 
 // TODO(casey): Not sure if this should actually be Meow128_Zero(A) ((A) = _mm_setzero_si128()), maybe
 #define Meow128_Zero() _mm_setzero_si128()
