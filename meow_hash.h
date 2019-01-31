@@ -129,6 +129,23 @@
 // You have been warned.
 //
 
+#ifndef LLVM_FALLTHROUGH
+/// LLVM_FALLTHROUGH - Mark fallthrough cases in switch statements.
+#if __cplusplus > 201402L && __has_cpp_attribute(fallthrough)
+#define LLVM_FALLTHROUGH [[fallthrough]]
+#elif __has_cpp_attribute(gnu::fallthrough)
+#define LLVM_FALLTHROUGH [[gnu::fallthrough]]
+#elif !__cplusplus
+// Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
+// error when __has_cpp_attribute is given a scoped attribute in C mode.
+#define LLVM_FALLTHROUGH
+#elif __has_cpp_attribute(clang::fallthrough)
+#define LLVM_FALLTHROUGH [[clang::fallthrough]]
+#else
+#define LLVM_FALLTHROUGH
+#endif
+#endif
+
 static const unsigned char MeowShiftAdjust[31] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128};
 static const unsigned char MeowMaskLen[32] = {255,255,255,255, 255,255,255,255, 255,255,255,255, 255,255,255,255, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0};
 
@@ -226,8 +243,8 @@ MeowHash_Accelerated(meow_u64 Seed, meow_u64 TotalLengthInBytes, void *SourceIni
     
     switch(Len128)
     {
-        case 48: S2 = Meow128_AESDEC_Mem(S2, Source + 32);
-        case 32: S1 = Meow128_AESDEC_Mem(S1, Source + 16);
+        case 48: S2 = Meow128_AESDEC_Mem(S2, Source + 32); LLVM_FALLTHROUGH;
+        case 32: S1 = Meow128_AESDEC_Mem(S1, Source + 16); LLVM_FALLTHROUGH;
         case 16: S0 = Meow128_AESDEC_Mem(S0, Source);
     }
     
