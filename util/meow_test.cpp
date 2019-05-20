@@ -44,7 +44,18 @@ static void OS_PageFree( void * ptr )
 {
   VirtualFree( ( (char*)ptr ) - MEOW_PAGESIZE,0,MEM_RELEASE);
 }
+#else
+// TODO(casey): Page-guarded alloc/free for Linux/Mac w/ mmap/mprotect/etc.
+static void * OS_PageAlloc( void ) // allocate a page of memory with a guard page after it
+{
+    void * p = malloc(MEOW_PAGESIZE);
+    return ( p );
+}
 
+static void OS_PageFree( void * ptr )
+{
+    free(ptr);
+}
 #endif
 
 //
@@ -349,14 +360,14 @@ main(int ArgCount, char **Args)
                 memset( Allocation + i, 0x27, length );
                 
                 meow_u128 ImpHash;
-                __try
+                TRY
                 {
                     MeowDumpTo = TestDump;
                     ImpHash = Type->Imp(MeowDefaultSeed, length, Allocation + i);
                     TestDumpCount = MeowDumpTo - TestDump;
                     MeowDumpTo = 0;
                 }
-                __except(1)
+                CATCH
                 {
                     crash = 1;
                     printf( "%s: Crash at offset: %d with byte length: %d\n", Type->FullName, i-(MEOW_PAGESIZE-32), length );
