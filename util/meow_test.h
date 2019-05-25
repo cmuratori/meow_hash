@@ -40,6 +40,7 @@ static void* aligned_alloc(size_t alignment, size_t size)
 
 #define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
 #include "meow_hash_x64_aesni.h"
+#define meow_u32 int unsigned
 
 static meow_u128
 MeowHash128(void *Seed128, meow_u64 Len, void *Source)
@@ -87,7 +88,7 @@ Wyhash64(void *Seed128, meow_u64 Len, void *Source)
 }
 
 #include "other/SpookyV2.cpp"
-    static meow_u128
+static meow_u128
 Spooky128(void *Seed128, meow_u64 Len, void *Source)
 {
     meow_u128 Result = {};
@@ -264,7 +265,7 @@ struct named_hash_type
     
     meow_hash_implementation *Imp;
     meow_hash_implementation *Reference;
-
+    
     meow_begin_implementation *Begin;
     meow_absorb_implementation *Absorb;
     meow_end_implementation *End;
@@ -277,7 +278,7 @@ extern "C" meow_u128 MeowHash_ASM(void *Seed128Init, meow_umm Len, void *SourceI
 static named_hash_type NamedHashTypes[] =
 {
 #define MEOW_HASH_TEST_INDEX_128 0
-
+    
     {(char *)"Meow128", (char *)"Meow 128-bit AES-NI", MeowHash, MeowHash, (meow_begin_implementation *)MeowBegin, (meow_absorb_implementation *)MeowAbsorb, (meow_end_implementation *)MeowEnd},
     
 #if MEOW_INCLUDE_ASM
@@ -288,7 +289,7 @@ static named_hash_type NamedHashTypes[] =
     {(char *)"Meow64", (char *)"Meow 64-bit AES-NI", MeowHashTruncate64},
     {(char *)"Meow32", (char *)"Meow 32-bit AES-NI", MeowHashTruncate32},
 #endif
-
+    
 #if MEOW_INCLUDE_OTHER_HASHES
     {(char *)"wyhash", (char *)"wyhash 64-bit", Wyhash64},
     {(char *)"Falk128", (char *)"Falk Hash 128-bit", FalkHash128},
@@ -305,7 +306,7 @@ static named_hash_type NamedHashTypes[] =
     
     // NOTE(casey): Highway Hash is disabled until someone provides a usable ~4 file implementation
     // that is optimized.
-//    {(char *)"High128", (char *)"Highway Hash 128-bit", HighwayHash128},
+    //    {(char *)"High128", (char *)"Highway Hash 128-bit", HighwayHash128},
 #endif
 };
 
@@ -335,7 +336,7 @@ PrintSize(FILE *Stream, double Size, int Fixed, int AllowDecimals = 1)
             }
         }
     }
-  
+    
     if(Decimals)
     {
         fprintf(Stream, Fixed ? "%6.2f%s" : "%0.2f%s", Size, Suffix);
