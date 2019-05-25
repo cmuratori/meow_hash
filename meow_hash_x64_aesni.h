@@ -53,13 +53,13 @@
    
    A: Anything requiring Level 4 or Level 5 security guarantees (see
       http://nohatcoder.dk/2019-05-19-1.html#level3).  Also, note that
-	  Meow is a new hash and has not had the extensive community
-	  cryptanalysis necessary to ensure that it is not breakable down to
-	  a lower level of hash, so you must do your due diligence in 
-	  deciding when and where to use Meow instead of a slower but
-	  more extensively studied existing hash.  We have tried to design
-	  it to provide Level 3 security, but the possibility of the hash
-	  being broken in the future always exists.
+      Meow is a new hash and has not had the extensive community
+      cryptanalysis necessary to ensure that it is not breakable down to
+      a lower level of hash, so you must do your due diligence in 
+      deciding when and where to use Meow instead of a slower but
+      more extensively studied existing hash.  We have tried to design
+      it to provide Level 3 security, but the possibility of the hash
+      being broken in the future always exists.
       
    Q: Why is it called the "Meow hash"?
    
