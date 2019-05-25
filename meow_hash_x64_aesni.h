@@ -33,31 +33,33 @@
    
    Q: What is it?
    
-   A: Meow is a 128-bit non-cryptographic hash that operates at high speeds
-      on x64 processors, and potentially other processors that provide
-      accelerated AES instructions.
-      
+   A: Meow is a 128-bit Level 3 hash taking 128 bytes of seed.  It operates
+      at very high speeds on x64 processors, and potentially other processors
+      that provide accelerated AES instructions.
+
    Q: What is it GOOD for?
    
    A: Quickly hashing any amount of data for comparison purposes such as
       block deduplication or change detection.  It is fast on all buffer
-      sizes, and can generally be used anywhere you need fast non-cryptographic
+      sizes, and can generally be used anywhere you need fast Level 3
       hashing without worrying about how big or small the inputs tend to be.
       
       However, substantial speed improvements could be made over Meow
       if you either a) know you are always hashing an exact, small number of bytes,
       or b) can always supply a small number of bytes in a buffer padded to some
-      fixed multiple of 16.  So, if you __can__ do one of those two things, we would
-      recommend hard-coding three or four aesdecs per 16 bytes directly into
-      a macro which will eliminate all branching and any setup overhead.
+      fixed multiple of 16.
       
    Q: What is it BAD for?
    
-   A: Anything security-related.  This is not a cryptographic hash, and does
-      not provide the kind of inscrutability that comes with something like
-      SHA-3.  It is also not particularly fast on processors that don't
-      support AES instructions, since the AES operations have to be encoded
-      with actual lookup tables on those processors.
+   A: Anything requiring Level 4 or Level 5 security guarantees (see
+      http://nohatcoder.dk/2019-05-19-1.html#level3).  Also, note that
+	  Meow is a new hash and has not had the extensive community
+	  cryptanalysis necessary to ensure that it is not breakable down to
+	  a lower level of hash, so you must do your due diligence in 
+	  deciding when and where to use Meow instead of a slower but
+	  more extensively studied existing hash.  We have tried to design
+	  it to provide Level 3 security, but the possibility of the hash
+	  being broken in the future always exists.
       
    Q: Why is it called the "Meow hash"?
    
@@ -104,11 +106,12 @@
 
 //
 // IMPORTANT(casey): We are currently evaluating this hash construction as
-// the final one for Meow Hash.  If you find a way to produce collisions,
-// find significant performance problems, or see any bugs in this version,
-// please be sure to report them to the Meow Hash GitHub as soon as possible.
-// We would like to know as much as we can about the robustness and performance
-// before committing to it as the final construction.
+// the final one for Meow Hash.  If you find a way to produce collisions
+// that should not be possible with a Level 3 hash, find significant performance 
+// problems, or see any bugs in this version, please be sure to report them 
+// to the Meow Hash GitHub as soon as possible.  We would like to know as 
+// much as we can about the robustness and performance before committing to 
+// it as the final construction.
 //
 
 #if !defined(MEOW_HASH_X64_AESNI_H)
@@ -119,14 +122,16 @@
 #if !defined(meow_u8)
 
 #if _MSC_VER
+#if !defined(__clang__)
+#define INSTRUCTION_REORDER_BARRIER _ReadWriteBarrier()
+#else
+#endif
 #include <intrin.h>
 #else
 #include <x86intrin.h>
 #endif
 
 #define meow_u8 char unsigned
-#define meow_u16 short unsigned
-#define meow_u32 int unsigned
 #define meow_u64 long long unsigned
 #define meow_u128 __m128i
 #define meow_umm long long unsigned
@@ -134,6 +139,10 @@
 #define MeowU32From(A, I) (_mm_extract_epi32((A), (I)))
 #define MeowU64From(A, I) (_mm_extract_epi64((A), (I)))
 #define MeowHashesAreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A), (B))) == 0xFFFF)
+
+#if !defined INSTRUCTION_REORDER_BARRIER
+#define INSTRUCTION_REORDER_BARRIER
+#endif
 
 #if !defined MEOW_PAGESIZE
 #define MEOW_PAGESIZE 4096
@@ -163,11 +172,13 @@
 
 #define MEOW_MIX_REG(r1, r2, r3, r4, r5,  i1, i2, i3, i4) \
 aesdec(r1, r2); \
+INSTRUCTION_REORDER_BARRIER; \
 paddq(r3, i1); \
 pxor(r2, i2); \
 aesdec(r2, r4); \
+INSTRUCTION_REORDER_BARRIER; \
 paddq(r5, i3); \
-pxor(r4, i4)
+pxor(r4, i4);
 
 #define MEOW_MIX(r1, r2, r3, r4, r5,  ptr) \
 MEOW_MIX_REG(r1, r2, r3, r4, r5, _mm_loadu_si128( (__m128i *) ((ptr) + 15) ), _mm_loadu_si128( (__m128i *) ((ptr) + 0)  ), _mm_loadu_si128( (__m128i *) ((ptr) + 1)  ), _mm_loadu_si128( (__m128i *) ((ptr) + 16) ))
@@ -260,11 +271,11 @@ MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
     movdqu(xmm7, rcx + 0x70);
     
     MEOW_DUMP_STATE("Seed", xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, 0);
-
+    
     //
     // NOTE(casey): Hash all full 256-byte blocks
     //
-
+    
     meow_umm BlockCount = (Len >> 8);
     if(BlockCount > MEOW_PREFETCH_LIMIT)
     {
@@ -314,7 +325,7 @@ MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
     
     pxor_clear(xmm9, xmm9);
     pxor_clear(xmm11, xmm11);
-
+    
     //
     // TODO(casey): I need to put more thought into how the end-of-buffer stuff is actually working out here,
     // because I _think_ it may be possible to remove the first branch (on Len8) and let the mask zero out the
@@ -339,7 +350,7 @@ MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
         // NOTE(jeffr): and off the extra bytes
         pand(xmm9, xmm8);
     }
-        
+    
     // NOTE(casey): Next, we have to load the part that _is_ 16-byte aligned
     if(Len & 0x10)
     {
@@ -356,9 +367,9 @@ MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
     palignr(xmm8, xmm11, 15);
     palignr(xmm10, xmm11, 1);
     
-    // TODO(casey): We have room for a 128-bit nonce and a 64-bit none here.  The reason I don't put them
-    // in is because it complicates the function signature.  But it seems logical that you might want them.
-    // Perhaps only the incremental version takes a nonce?
+    // NOTE(casey): We have room for a 128-bit nonce and a 64-bit none here, but
+    // the decision was made to leave them zero'd so as not to confuse people
+    // about hwo to use them or what security implications they had.
     pxor_clear(xmm12, xmm12);
     pxor_clear(xmm13, xmm13);
     pxor_clear(xmm14, xmm14);
@@ -410,7 +421,7 @@ MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
     MEOW_SHUFFLE(xmm3, xmm4, xmm5, xmm7, xmm0, xmm1);
     
     MEOW_DUMP_STATE("PostMix", xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, 0);
-
+    
     paddq(xmm0, xmm2);
     paddq(xmm1, xmm3);
     paddq(xmm4, xmm6);
@@ -470,7 +481,7 @@ MeowAbsorbBlocks(meow_state *State, meow_umm BlockCount, meow_u8 *rax)
     meow_u128 xmm5 = State->xmm5;
     meow_u128 xmm6 = State->xmm6;
     meow_u128 xmm7 = State->xmm7;
-
+    
     if(BlockCount > MEOW_PREFETCH_LIMIT)
     {
         while(BlockCount--)
@@ -582,7 +593,7 @@ MeowEnd(meow_state *State, meow_u8 *Store128)
     
     pxor_clear(xmm9, xmm9);
     pxor_clear(xmm11, xmm11);
-
+    
     meow_u8 *Last = (meow_u8 *)rax + (Len & 0xf0);
     int unsigned Len8 = (Len & 0xf);
     if(Len8)
@@ -591,30 +602,25 @@ MeowEnd(meow_state *State, meow_u8 *Store128)
         movdqu(xmm9, Last);
         pand(xmm9, xmm8);
     }
-
+    
     if(Len & 0x10)
     {
         xmm11 = xmm9;
         movdqu(xmm9, Last - 0x10);
     }
-
+    
     xmm8 = xmm9;
     xmm10 = xmm9;
     palignr(xmm8, xmm11, 15);
     palignr(xmm10, xmm11, 1);
     
-    //
-    // TODO(casey): What do we want to pad the length injest with?  It's 32 bytes but at most only 8 of them will be non-zero,
-    // and more typically only 2 or 3 of them will be non-zero.  At the moment I pad with 0's, but it may be better to pay
-    // with some section of the seed?
-    //
     pxor_clear(xmm12, xmm12);
     pxor_clear(xmm13, xmm13);
     pxor_clear(xmm14, xmm14);
     movq(xmm15, Len);
     palignr(xmm12, xmm15, 15);
     palignr(xmm14, xmm15, 1);
-
+    
     MEOW_DUMP_STATE("PostBlocks", xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, 0);
     MEOW_DUMP_STATE("Residuals", xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15, 0);
     
@@ -625,7 +631,7 @@ MeowEnd(meow_state *State, meow_u8 *Store128)
     MEOW_MIX_REG(xmm1, xmm5, xmm7, xmm2, xmm3,  xmm12, xmm13, xmm14, xmm15);
     
     MEOW_DUMP_STATE("PostAppend", xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, 0);
-
+    
     //
     // NOTE(casey): Hash all full 32-byte blocks
     //
@@ -645,7 +651,7 @@ MeowEnd(meow_state *State, meow_u8 *Store128)
     MixDown:
     
     MEOW_DUMP_STATE("PostLanes", xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, 0);
-
+    
     MEOW_SHUFFLE(xmm0, xmm1, xmm2, xmm4, xmm5, xmm6);
     MEOW_SHUFFLE(xmm1, xmm2, xmm3, xmm5, xmm6, xmm7);
     MEOW_SHUFFLE(xmm2, xmm3, xmm4, xmm6, xmm7, xmm0);
@@ -660,7 +666,7 @@ MeowEnd(meow_state *State, meow_u8 *Store128)
     MEOW_SHUFFLE(xmm3, xmm4, xmm5, xmm7, xmm0, xmm1);
     
     MEOW_DUMP_STATE("PostMix", xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, 0);
-
+    
     if(Store128)
     {
         movdqu_mem(Store128 + 0x00, xmm0);
@@ -680,12 +686,13 @@ MeowEnd(meow_state *State, meow_u8 *Store128)
     pxor(xmm0, xmm1);
     pxor(xmm4, xmm5);
     paddq(xmm0, xmm4);
-
+    
     MEOW_DUMP_STATE("PostFold", xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, 0);
-
+    
     return(xmm0);
 }
 
+#undef INSTRUCTION_REORDER_BARRIER
 #undef prefetcht0
 #undef movdqu
 #undef movdqu_mem
