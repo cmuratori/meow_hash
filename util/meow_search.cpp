@@ -1,7 +1,7 @@
 /* ========================================================================
 
    meow_search.cpp - basic file system Meow hash collision search
-   (C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)
+   (C) Copyright 2018-2019 by Molly Rocket, Inc. (https://mollyrocket.com)
    
    See https://mollyrocket.com/meowhash for details.
    
@@ -30,7 +30,7 @@ struct test_file
 
 struct test_value
 {
-    meow_hash Hash;
+    meow_u128 Hash;
     test_value *Next;
     test_file *FirstFile;
 };
@@ -231,7 +231,7 @@ IngestFile(test_group *Group, char *FileName)
         {
             test *Test = Group->Tests + TestIndex;
             
-            meow_hash Hash = Test->Type.Imp(0, File.Size, File.Contents);
+            meow_u128 Hash = Test->Type.Imp(MeowDefaultSeed, File.Size, File.Contents);
             
             test_value **Slot = &Test->Table[MeowU32From(Hash, 0) % ArrayCount(Test->Table)];
             test_value *Entry = *Slot;
@@ -248,7 +248,7 @@ IngestFile(test_group *Group, char *FileName)
                     Check = Check->Next)
                 {
                     entire_file OtherFile = ReadEntireFile(Group, Check->FileName);
-                    meow_hash OtherHash = Test->Type.Imp(0, OtherFile.Size, OtherFile.Contents);
+                    meow_u128 OtherHash = Test->Type.Imp(MeowDefaultSeed, OtherFile.Size, OtherFile.Contents);
                     if(MeowHashesAreEqual(Hash, OtherHash))
                     {
                         if(OtherFile.Contents &&

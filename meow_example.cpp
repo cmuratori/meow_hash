@@ -1,7 +1,7 @@
 /* ========================================================================
 
    meow_example.cpp - basic usage example of the Meow hash
-   (C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)
+   (C) Copyright 2018-2019 by Molly Rocket, Inc. (https://mollyrocket.com)
    
    See https://mollyrocket.com/meowhash for details.
    
@@ -12,16 +12,10 @@
 #include <memory.h>
 
 //
-// NOTE(casey): Step 1 - include an intrinsics header, then include meow_hash.h
-//
-// Meow relies on definitions for non-standard types (meow_u128, etc.) and
-// intrinsics for various platforms. You can either include the supplied meow_intrinsics.h
-// file that will define these for you with its best guesses for your platform, or for
-// more control, you can define them all yourself to map to your own stuff.
+// NOTE(casey): Step 1 - include the meow_hash header for your platform
 //
 
-#include "meow_intrinsics.h" // NOTE(casey): Platform prerequisites for the Meow hash code (replace with your own, if you want)
-#include "meow_hash.h" // NOTE(casey): The Meow hash code itself
+#include "meow_hash_x64_aesni.h"
 
 //
 // NOTE(casey): Step 2 - use the Meow hash in a variety of ways!
@@ -37,16 +31,16 @@
 // NOTE(casey): entire_file / ReadEntireFile / FreeEntireFile are simple helpers
 // for loading a file into memory.  They are defined at the end of this file.
 //
-struct entire_file
+typedef struct entire_file
 {
     size_t Size;
     void *Contents;
-};
+} entire_file;
 static entire_file ReadEntireFile(char *Filename);
 static void FreeEntireFile(entire_file *File);
 
 static void
-PrintHash(meow_hash Hash)
+PrintHash(meow_u128 Hash)
 {
     printf("    %08X-%08X-%08X-%08X\n",
            MeowU32From(Hash, 3),
@@ -69,7 +63,7 @@ HashTestBuffer(void)
     }
     
     // NOTE(casey): Ask Meow for the hash
-    meow_hash Hash = MeowHash_Accelerated(0, Size, Buffer);
+    meow_u128 Hash = MeowHash(MeowDefaultSeed, Size, Buffer);
     
     // NOTE(casey): Extract example smaller hash sizes you might want:
     long long unsigned Hash64 = MeowU64From(Hash, 0);
@@ -90,7 +84,7 @@ HashOneFile(char *FilenameA)
     if(A.Contents)
     {
         // NOTE(casey): Ask Meow for the hash
-        meow_hash HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
+        meow_u128 HashA = MeowHash(MeowDefaultSeed, A.Size, A.Contents);
         
         // NOTE(casey): Print the hash
         printf("  Hash of \"%s\":\n", FilenameA);
@@ -109,8 +103,8 @@ CompareTwoFiles(char *FilenameA, char *FilenameB)
     if(A.Contents && B.Contents)
     {
         // NOTE(casey): Hash both files
-        meow_hash HashA = MeowHash_Accelerated(0, A.Size, A.Contents);
-        meow_hash HashB = MeowHash_Accelerated(0, B.Size, B.Contents);
+        meow_u128 HashA = MeowHash(MeowDefaultSeed, A.Size, A.Contents);
+        meow_u128 HashB = MeowHash(MeowDefaultSeed, B.Size, B.Contents);
         
         // NOTE(casey): Check for match
         int HashesMatch = MeowHashesAreEqual(HashA, HashB);
@@ -160,7 +154,7 @@ main(int ArgCount, char **Args)
 {
     // NOTE(casey): Print the banner
     printf("meow_example %s - basic usage example of the Meow hash\n", MEOW_HASH_VERSION_NAME);
-    printf("(C) Copyright 2018 by Molly Rocket, Inc. (https://mollyrocket.com)\n");
+    printf("(C) Copyright 2018-2019 by Molly Rocket, Inc. (https://mollyrocket.com)\n");
     printf("See https://mollyrocket.com/meowhash for details.\n");
     printf("\n");
     
@@ -191,7 +185,7 @@ main(int ArgCount, char **Args)
 static entire_file
 ReadEntireFile(char *Filename)
 {
-    entire_file Result = {};
+    entire_file Result = {0};
     
     FILE *File = fopen(Filename, "rb");
     if(File)
@@ -199,7 +193,7 @@ ReadEntireFile(char *Filename)
         fseek(File, 0, SEEK_END);
         Result.Size = ftell(File);
         fseek(File, 0, SEEK_SET);
-
+        
         Result.Contents = malloc(Result.Size);
         if(Result.Contents)
         {
@@ -220,7 +214,7 @@ ReadEntireFile(char *Filename)
     {
         printf("ERROR: Unable to load \"%s\"\n", Filename);
     }
-   
+    
     
     return(Result);
 }
