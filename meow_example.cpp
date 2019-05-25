@@ -193,7 +193,7 @@ ReadEntireFile(char *Filename)
         fseek(File, 0, SEEK_END);
         Result.Size = ftell(File);
         fseek(File, 0, SEEK_SET);
-
+        
         Result.Contents = malloc(Result.Size);
         if(Result.Contents)
         {
@@ -214,7 +214,7 @@ ReadEntireFile(char *Filename)
     {
         printf("ERROR: Unable to load \"%s\"\n", Filename);
     }
-   
+    
     
     return(Result);
 }

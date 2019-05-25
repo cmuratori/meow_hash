@@ -36,7 +36,7 @@
    A: Meow is a 128-bit Level 3 hash taking 128 bytes of seed.  It operates
       at very high speeds on x64 processors, and potentially other processors
       that provide accelerated AES instructions.
-
+      
    Q: What is it GOOD for?
    
    A: Quickly hashing any amount of data for comparison purposes such as
@@ -55,7 +55,7 @@
       http://nohatcoder.dk/2019-05-19-1.html#level3).  Also, note that
       Meow is a new hash and has not had the extensive community
       cryptanalysis necessary to ensure that it is not breakable down to
-      a lower level of hash, so you must do your due diligence in 
+      a lower level of hash, so you must do your due diligence in
       deciding when and where to use Meow instead of a slower but
       more extensively studied existing hash.  We have tried to design
       it to provide Level 3 security, but the possibility of the hash
@@ -107,10 +107,10 @@
 //
 // IMPORTANT(casey): We are currently evaluating this hash construction as
 // the final one for Meow Hash.  If you find a way to produce collisions
-// that should not be possible with a Level 3 hash, find significant performance 
-// problems, or see any bugs in this version, please be sure to report them 
-// to the Meow Hash GitHub as soon as possible.  We would like to know as 
-// much as we can about the robustness and performance before committing to 
+// that should not be possible with a Level 3 hash, find significant performance
+// problems, or see any bugs in this version, please be sure to report them
+// to the Meow Hash GitHub as soon as possible.  We would like to know as
+// much as we can about the robustness and performance before committing to
 // it as the final construction.
 //
 
@@ -134,10 +134,18 @@
 #define meow_u8 char unsigned
 #define meow_u64 long long unsigned
 #define meow_u128 __m128i
+
+#if __x86_64__ || _M_AMD64
 #define meow_umm long long unsigned
+#define MeowU64From(A, I) (_mm_extract_epi64((A), (I)))
+#elif __i386__  || _M_IX86
+#define meow_umm int unsigned
+#define MeowU64From(A, I) (*(meow_u64 *)&(A))
+#else
+#error Cannot determine architecture to use!
+#endif
 
 #define MeowU32From(A, I) (_mm_extract_epi32((A), (I)))
-#define MeowU64From(A, I) (_mm_extract_epi64((A), (I)))
 #define MeowHashesAreEqual(A, B) (_mm_movemask_epi8(_mm_cmpeq_epi8((A), (B))) == 0xFFFF)
 
 #if !defined INSTRUCTION_REORDER_BARRIER
