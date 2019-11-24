@@ -375,9 +375,9 @@ MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
     palignr(xmm8, xmm11, 15);
     palignr(xmm10, xmm11, 1);
     
-    // NOTE(casey): We have room for a 128-bit nonce and a 64-bit none here, but
+    // NOTE(casey): We have room for a 128-bit nonce and a 64-bit nonce here, but
     // the decision was made to leave them zero'd so as not to confuse people
-    // about hwo to use them or what security implications they had.
+    // about how to use them or what security implications they had.
     pxor_clear(xmm12, xmm12);
     pxor_clear(xmm13, xmm13);
     pxor_clear(xmm14, xmm14);
