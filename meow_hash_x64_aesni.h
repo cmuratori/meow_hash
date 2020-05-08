@@ -256,7 +256,7 @@ static meow_u8 MeowDefaultSeed[128] =
 //
 
 static meow_u128
-MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
+MeowHash(const void *Seed128Init, meow_umm Len, const void *SourceInit)
 {
     meow_u128 xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7; // NOTE(casey): xmm0-xmm7 are the hash accumulation lanes
     meow_u128 xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15; // NOTE(casey): xmm8-xmm15 hold values to be appended (residual, length)
@@ -459,7 +459,7 @@ typedef struct meow_state
 } meow_state;
 
 static void
-MeowBegin(meow_state *State, void *Seed128)
+MeowBegin(meow_state *State, const void *Seed128)
 {
     meow_u8 *rcx = (meow_u8 *)Seed128;
     
@@ -539,7 +539,7 @@ MeowAbsorbBlocks(meow_state *State, meow_umm BlockCount, meow_u8 *rax)
 }
 
 static void
-MeowAbsorb(meow_state *State, meow_umm Len, void *SourceInit)
+MeowAbsorb(meow_state *State, meow_umm Len, const void *SourceInit)
 {
     State->TotalLengthInBytes += Len;
     meow_u8 *Source = (meow_u8 *)SourceInit;
@@ -725,7 +725,7 @@ MeowEnd(meow_state *State, meow_u8 *Store128)
 //
 
 static void
-MeowExpandSeed(meow_umm InputLen, void *Input, meow_u8 *SeedResult)
+MeowExpandSeed(meow_umm InputLen, const void *Input, meow_u8 *SeedResult)
 {
     meow_state State;
     meow_u64 LengthTab = (meow_u64)InputLen; // NOTE(casey): We need to always injest 8-byte lengths exactly, even on 32-bit builds, to ensure identical results
