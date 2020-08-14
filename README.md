@@ -4,3 +4,8 @@ This is the official x64 implementation of the Meow hash, a fast [Level 3](http:
 This version is v0.5 and is a **proposal for the final hash construction**.  Please provide as much testing, analysis, and commentary on the hash function as you can.  If we cannot substantially improve the hash function from here, this construction will be used for v1.0.
 
 This version builds on Windows/MSVC, Windows/CLANG, and Linux/CLANG, with support for x64 AES-NI processors.
+
+# Unofficial Ports
+We do not maintain or vet these ports in any way.  Their correctness and performance may differ from the official Meow Hash.  Use at your own risk.
+* [.NET core port](https://github.com/tvandijck/meow_hash.NET) (by [Tom van Dijck](https://github.com/tvandijck))
+If you have ported Meow Hash to another language, and would like to link to your repository here, please open an issue an include the information and link.
