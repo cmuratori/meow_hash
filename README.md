@@ -9,5 +9,6 @@ This version builds on Windows/MSVC, Windows/CLANG, and Linux/CLANG, with suppor
 We do not maintain or vet these ports in any way.  Their correctness and performance may differ from the official Meow Hash.  Use at your own risk.
 
 * [.NET core port](https://github.com/tvandijck/meow_hash.NET) (by [Tom van Dijck](https://github.com/tvandijck))
+* [Rust port](https://github.com/bodil/meowhash-rs) (by [Bodil Stokke](https://github.com/bodil))
 
 If you have ported Meow Hash to another language, and would like to link to your repository here, please open an issue an include the information and link.
