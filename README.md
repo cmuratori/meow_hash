@@ -7,7 +7,7 @@ This version builds on Windows/MSVC, Windows/CLANG, and Linux/CLANG, with suppor
 
 # Important Security Notice
 
-Due to recent discoveries by [Peter Schmidt-Nielsen](https://github.com/petersn), we have decided to reclassify Meow hash 0.5/calico from level 3 to level 1. This means that we recommend not to use this hash for message authentication codes, or for hash tables in scenarios where collision induced denial-of-service attacks are a concern.
+Due to [recent discoveries](https://peter.website/meow-hash-cryptanalysis) by [Peter Schmidt-Nielsen](https://github.com/petersn), we have decided to reclassify Meow hash 0.5/calico from level 3 to level 1. This means that we recommend not to use this hash for message authentication codes, or for hash tables in scenarios where collision induced denial-of-service attacks are a concern.
 
 We have seen no evidence that the hash is unfit for non-adversarial/non-cryptographic purposes, and continue to believe that it is amongst the best in this regard.
 
