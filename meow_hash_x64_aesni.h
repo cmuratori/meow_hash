@@ -86,11 +86,11 @@
       A number of valuable additions to Meow Hash were also contributed
       by other great folks along the way:
       
-      JEFF ROBERTS (https://radgametools.com) provided a super slick
+      JEFF ROBERTS (http://radgametools.com) provided a super slick
       way to handle the residual end-of-buffer bytes that dramatically
       improved Meow's small hash performance.
       
-      MARTINS MOZEIKO (https://matrins.ninja) ported Meow to ARM and
+      MARTINS MOZEIKO (https://martins.ninja) ported Meow to ARM and
       ANSI-C, and added the proper preprocessor dressing for clean
       compilation on a variety of compiler configurations.
       
