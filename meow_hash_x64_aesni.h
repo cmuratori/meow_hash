@@ -352,6 +352,9 @@ MeowHash(void *Seed128Init, meow_umm Len, void *SourceInit)
         meow_u8 *LastOk = (meow_u8*)((((meow_umm)(((meow_u8 *)SourceInit)+Len - 1)) | (MEOW_PAGESIZE - 1)) - 16);
         int Align = (Last > LastOk) ? ((int)(meow_umm)Last) & 0xf : 0;
         movdqu(xmm10, &MeowShiftAdjust[Align]);
+#if defined(__SANITIZE_ADDRESS__) || (defined(__clang__) && __has_feature(address_sanitizer))
+#error ASAN falsely believes that this is a heap-buffer-overflow https://github.com/cmuratori/meow_hash/issues/79
+#endif
         movdqu(xmm9, Last - Align);
         pshufb(xmm9, xmm10);
         
