@@ -18,5 +18,6 @@ We do not maintain or vet these ports in any way.  Their correctness and perform
 
 * [.NET core port](https://github.com/tvandijck/meow_hash.NET) (by [Tom van Dijck](https://github.com/tvandijck))
 * [Rust port](https://github.com/bodil/meowhash-rs) (by [Bodil Stokke](https://github.com/bodil))
+* [Java port]([https://github.com/bodil/meowhash-rs](https://github.com/LWJGL/lwjgl3)) (by [LWJGL](https://github.com/LWJGL))
 
 If you have ported Meow Hash to another language, and would like to link to your repository here, please open an issue an include the information and link.
